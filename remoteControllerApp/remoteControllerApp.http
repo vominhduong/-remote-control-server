@@ -1,0 +1,6 @@
+@remoteControllerApp_HostAddress = http://localhost:5271
+
+GET {{remoteControllerApp_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

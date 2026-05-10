@@ -1,0 +1,344 @@
+﻿<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>SignalR Remote Control Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+        }
+
+        button {
+            margin: 5px;
+            padding: 10px 14px;
+            cursor: pointer;
+        }
+
+        input {
+            padding: 8px;
+            margin: 5px;
+            width: 240px;
+        }
+
+        .box {
+            border: 1px solid #ccc;
+            padding: 12px;
+            margin-bottom: 14px;
+        }
+
+        #log {
+            margin-top: 20px;
+            padding: 12px;
+            background: #111;
+            color: #00ff88;
+            height: 380px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            font-family: Consolas, monospace;
+        }
+    </style>
+</head>
+<body>
+    <h2>Remote Control SignalR Test</h2>
+
+    <div class="box">
+        <h3>Connection</h3>
+        <button onclick="connect()">Connect SignalR</button>
+        <button onclick="disconnect()">Disconnect</button>
+    </div>
+
+    <div class="box">
+        <h3>Host Test</h3>
+        <input id="hostId" value="HOST_001" placeholder="Host ID" />
+        <input id="computerName" value="Test Computer" placeholder="Computer Name" />
+        <button onclick="registerHost()">Register Host</button>
+        <button onclick="pingHost()">Ping Host</button>
+        <br />
+        <input id="hostSessionId" placeholder="Session ID received by Host" />
+        <button onclick="acceptControl()">Accept Control</button>
+        <button onclick="rejectControl()">Reject Control</button>
+    </div>
+
+    <div class="box">
+        <h3>Viewer Test</h3>
+        <input id="viewerId" value="VIEWER_001" placeholder="Viewer ID" />
+        <input id="viewerName" value="Test Viewer" placeholder="Viewer Name" />
+        <button onclick="registerViewer()">Register Viewer</button>
+        <button onclick="pingViewer()">Ping Viewer</button>
+        <button onclick="requestControl()">Request Control</button>
+        <br />
+        <input id="viewerSessionId" placeholder="Session ID created by Viewer" />
+        <button onclick="endControl()">End Control</button>
+    </div>
+
+    <div class="box">
+        <h3>Check API</h3>
+        <button onclick="openHosts()">Open /api/Connection/hosts</button>
+        <button onclick="openViewers()">Open /api/Connection/viewers</button>
+        <button onclick="openSessions()">Open /api/Session</button>
+        <button onclick="openActiveSessions()">Open /api/Session/active</button>
+    </div>
+
+    <div id="log"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.7/signalr.min.js"></script>
+
+    <script>
+        let connection = null;
+
+        function log(message) {
+            const logBox = document.getElementById("log");
+            const time = new Date().toLocaleTimeString();
+            logBox.textContent += `[${time}] ${message}\n`;
+            logBox.scrollTop = logBox.scrollHeight;
+        }
+
+        async function connect() {
+            try {
+                connection = new signalR.HubConnectionBuilder()
+                    .withUrl("/remoteHub")
+                    .withAutomaticReconnect()
+                    .build();
+
+                registerSignalREvents();
+
+                await connection.start();
+
+                log("Connected to SignalR server.");
+                log("ConnectionId: " + connection.connectionId);
+            } catch (err) {
+                log("Connect error: " + err);
+            }
+        }
+
+        function registerSignalREvents() {
+            connection.on("RegisterHostSuccess", function (hostId) {
+                log("RegisterHostSuccess: " + hostId);
+            });
+
+            connection.on("RegisterHostFailed", function (message) {
+                log("RegisterHostFailed: " + message);
+            });
+
+            connection.on("RegisterViewerSuccess", function (viewerId) {
+                log("RegisterViewerSuccess: " + viewerId);
+            });
+
+            connection.on("RegisterViewerFailed", function (message) {
+                log("RegisterViewerFailed: " + message);
+            });
+
+            connection.on("Pong", function (serverTime) {
+                log("Pong from server: " + serverTime);
+            });
+
+            connection.on("ReceiveControlRequest", function (data) {
+                log("ReceiveControlRequest:");
+                log(JSON.stringify(data, null, 2));
+
+                document.getElementById("hostSessionId").value = data.sessionId;
+            });
+
+            connection.on("ControlRequestSent", function (data) {
+                log("ControlRequestSent:");
+                log(JSON.stringify(data, null, 2));
+
+                document.getElementById("viewerSessionId").value = data.sessionId;
+            });
+
+            connection.on("ControlRequestFailed", function (message) {
+                log("ControlRequestFailed: " + message);
+            });
+
+            connection.on("ControlAccepted", function (data) {
+                log("ControlAccepted:");
+                log(JSON.stringify(data, null, 2));
+            });
+
+            connection.on("ControlRejected", function (data) {
+                log("ControlRejected:");
+                log(JSON.stringify(data, null, 2));
+            });
+
+            connection.on("AcceptControlSuccess", function (sessionId) {
+                log("AcceptControlSuccess: " + sessionId);
+            });
+
+            connection.on("AcceptControlFailed", function (message) {
+                log("AcceptControlFailed: " + message);
+            });
+
+            connection.on("RejectControlSuccess", function (sessionId) {
+                log("RejectControlSuccess: " + sessionId);
+            });
+
+            connection.on("RejectControlFailed", function (message) {
+                log("RejectControlFailed: " + message);
+            });
+
+            connection.on("ControlEnded", function (data) {
+                log("ControlEnded:");
+                log(JSON.stringify(data, null, 2));
+            });
+
+            connection.on("EndControlFailed", function (message) {
+                log("EndControlFailed: " + message);
+            });
+
+            connection.onreconnecting(function () {
+                log("Reconnecting...");
+            });
+
+            connection.onreconnected(function () {
+                log("Reconnected.");
+            });
+
+            connection.onclose(function () {
+                log("Connection closed.");
+            });
+        }
+
+        async function disconnect() {
+            if (!connection) {
+                log("Connection is null.");
+                return;
+            }
+
+            await connection.stop();
+            log("Disconnected.");
+        }
+
+        async function registerHost() {
+            if (!connection) {
+                log("Please connect first.");
+                return;
+            }
+
+            const request = {
+                hostId: document.getElementById("hostId").value,
+                computerName: document.getElementById("computerName").value
+            };
+
+            await connection.invoke("RegisterHost", request);
+            log("RegisterHost sent: " + JSON.stringify(request));
+        }
+
+        async function registerViewer() {
+            if (!connection) {
+                log("Please connect first.");
+                return;
+            }
+
+            const request = {
+                viewerId: document.getElementById("viewerId").value,
+                viewerName: document.getElementById("viewerName").value
+            };
+
+            await connection.invoke("RegisterViewer", request);
+            log("RegisterViewer sent: " + JSON.stringify(request));
+        }
+
+        async function pingHost() {
+            if (!connection) {
+                log("Please connect first.");
+                return;
+            }
+
+            const hostId = document.getElementById("hostId").value;
+            await connection.invoke("PingHost", hostId);
+            log("PingHost sent: " + hostId);
+        }
+
+        async function pingViewer() {
+            if (!connection) {
+                log("Please connect first.");
+                return;
+            }
+
+            const viewerId = document.getElementById("viewerId").value;
+            await connection.invoke("PingViewer", viewerId);
+            log("PingViewer sent: " + viewerId);
+        }
+
+        async function requestControl() {
+            if (!connection) {
+                log("Please connect first.");
+                return;
+            }
+
+            const request = {
+                hostId: document.getElementById("hostId").value,
+                viewerId: document.getElementById("viewerId").value,
+                viewerName: document.getElementById("viewerName").value
+            };
+
+            await connection.invoke("RequestControl", request);
+            log("RequestControl sent:");
+            log(JSON.stringify(request, null, 2));
+        }
+
+        async function acceptControl() {
+            if (!connection) {
+                log("Please connect first.");
+                return;
+            }
+
+            const response = {
+                sessionId: document.getElementById("hostSessionId").value,
+                accepted: true,
+                reason: null
+            };
+
+            await connection.invoke("AcceptControl", response);
+            log("AcceptControl sent:");
+            log(JSON.stringify(response, null, 2));
+        }
+
+        async function rejectControl() {
+            if (!connection) {
+                log("Please connect first.");
+                return;
+            }
+
+            const response = {
+                sessionId: document.getElementById("hostSessionId").value,
+                accepted: false,
+                reason: "Host rejected the request."
+            };
+
+            await connection.invoke("RejectControl", response);
+            log("RejectControl sent:");
+            log(JSON.stringify(response, null, 2));
+        }
+
+        async function endControl() {
+            if (!connection) {
+                log("Please connect first.");
+                return;
+            }
+
+            const sessionId = document.getElementById("viewerSessionId").value;
+
+            await connection.invoke("EndControl", sessionId);
+            log("EndControl sent: " + sessionId);
+        }
+
+        function openHosts() {
+            window.open("/api/Connection/hosts", "_blank");
+        }
+
+        function openViewers() {
+            window.open("/api/Connection/viewers", "_blank");
+        }
+
+        function openSessions() {
+            window.open("/api/Session", "_blank");
+        }
+
+        function openActiveSessions() {
+            window.open("/api/Session/active", "_blank");
+        }
+    </script>
+</body>
+</html>
