@@ -35,6 +35,16 @@ public class SessionManager
         return session;
     }
 
+    public RemoteSession? GetAcceptedSession(string sessionId)
+    {
+        if (!_sessions.TryGetValue(sessionId, out var session))
+        {
+            return null;
+        }
+
+        return session.Status == "Accepted" ? session : null;
+    }
+
     public List<RemoteSession> GetAllSessions()
     {
         return _sessions.Values
@@ -57,6 +67,11 @@ public class SessionManager
             return false;
         }
 
+        if (session.Status != "Pending")
+        {
+            return false;
+        }
+
         session.Status = "Accepted";
         session.AcceptedAt = DateTime.UtcNow;
 
@@ -66,6 +81,11 @@ public class SessionManager
     public bool RejectSession(string sessionId, string? reason)
     {
         if (!_sessions.TryGetValue(sessionId, out var session))
+        {
+            return false;
+        }
+
+        if (session.Status != "Pending")
         {
             return false;
         }
@@ -80,6 +100,11 @@ public class SessionManager
     public bool EndSession(string sessionId)
     {
         if (!_sessions.TryGetValue(sessionId, out var session))
+        {
+            return false;
+        }
+
+        if (session.Status == "Ended")
         {
             return false;
         }

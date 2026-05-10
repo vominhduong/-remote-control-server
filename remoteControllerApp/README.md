@@ -1,35 +1,38 @@
 # Remote Controller App - Server
 
-## 1. Tổng quan dự án
+## 1. Tổng quan
 
-`remoteControllerApp` là **server trung gian** cho hệ thống điều khiển máy tính từ xa.
+`remoteControllerApp` là server trung gian cho hệ thống điều khiển máy tính từ xa.
 
-Mục tiêu của server là:
+Server hiện đang xử lý các phần chính:
 
-- Cho phép **Host** đăng ký online.
-- Cho phép **Viewer** đăng ký online.
-- Quản lý kết nối realtime bằng **SignalR**.
-- Cho phép Viewer gửi yêu cầu điều khiển đến Host.
-- Cho phép Host chấp nhận hoặc từ chối yêu cầu điều khiển.
-- Quản lý phiên điều khiển tạm thời trong RAM.
-- Cung cấp REST API để kiểm tra Host, Viewer và Session.
+```text
+Host / Viewer kết nối realtime
+Quản lý trạng thái online
+Tạo phiên điều khiển
+Host chấp nhận hoặc từ chối phiên
+Host gửi màn hình sang Viewer
+Viewer gửi thao tác chuột / bàn phím về Host
+```
 
 Kiến trúc hiện tại:
 
 ```text
-Viewer / Host
-     |
-     | SignalR realtime
-     v
+Host App / Test HTML
+        |
+        | SignalR
+        v
 ASP.NET Core Server
-     |
-     | In-memory Manager
-     v
+        |
+        | In-memory managers
+        v
 ConnectionManager + SessionManager
+        |
+        v
+REST API kiểm tra trạng thái
 ```
 
-Ở giai đoạn hiện tại, server **chưa dùng database**.  
-Tất cả trạng thái online và session đang được lưu tạm trong RAM.
+Hiện tại hệ thống đang ở mức **MVP server + HTML test**. Chưa dùng database, Firebase, JWT hoặc WinForms thật.
 
 ---
 
@@ -39,30 +42,47 @@ Tất cả trạng thái online và session đang được lưu tạm trong RAM.
 ASP.NET Core Web API
 SignalR
 C#
-.NET 8 / .NET 10 template style
-HTML + JavaScript test client
+HTML + JavaScript SignalR Client
 In-memory storage
 ```
 
-SignalR được dùng để xử lý realtime communication giữa Host, Viewer và Server.
+SignalR dùng cho realtime:
+
+```text
+Host online
+Viewer online
+Request control
+Accept / Reject session
+Screen streaming
+Mouse event
+Keyboard event
+```
+
+REST API dùng để kiểm tra trạng thái:
+
+```text
+Danh sách Host online
+Danh sách Viewer online
+Danh sách session
+```
 
 ---
 
-## 3. Các Phase đã thực hiện
+## 3. Các phase đã thực hiện
 
-## Phase 1 - Realtime Connection
+## Phase 1 — Host / Viewer kết nối realtime
 
 Mục tiêu:
 
-- Host kết nối được vào server.
-- Viewer kết nối được vào server.
-- Server lưu được `connectionId`.
-- Server biết Host nào online.
-- Server biết Viewer nào online.
-- Server xử lý khi client disconnect.
-- Có API kiểm tra danh sách Host/Viewer online.
+```text
+Host kết nối được vào SignalR Server
+Viewer kết nối được vào SignalR Server
+Server biết Host nào đang online
+Server biết Viewer nào đang online
+Server xử lý khi client disconnect
+```
 
-Chức năng đã có:
+Đã thực hiện:
 
 ```text
 RegisterHost()
@@ -71,39 +91,170 @@ PingHost()
 PingViewer()
 OnConnectedAsync()
 OnDisconnectedAsync()
-GET /api/Connection/hosts
-GET /api/Connection/viewers
+ConnectionManager
+ConnectionController
+ConnectionService
+```
+
+Kết quả:
+
+```text
+Host đăng ký online thành công
+Viewer đăng ký online thành công
+API xem được danh sách Host/Viewer online
 ```
 
 ---
 
-## Phase 2 - Control Session Request
+## Phase 2 — Tạo phiên điều khiển
 
 Mục tiêu:
 
-- Viewer chọn Host để gửi yêu cầu điều khiển.
-- Server tạo phiên điều khiển trạng thái `Pending`.
-- Host nhận request điều khiển realtime.
-- Host có thể `Accept` hoặc `Reject`.
-- Viewer nhận kết quả realtime.
-- Server quản lý session trong RAM.
-- Có API kiểm tra danh sách session.
+```text
+Viewer yêu cầu điều khiển Host
+Server tạo session trạng thái Pending
+Host nhận request realtime
+Host Accept hoặc Reject
+Viewer nhận kết quả
+```
 
-Chức năng đã có:
+Đã thực hiện:
 
 ```text
+RemoteSession model
+SessionManager
+SessionService
+SessionController
 RequestControl()
 AcceptControl()
 RejectControl()
 EndControl()
-GET /api/Session
-GET /api/Session/active
-GET /api/Session/{sessionId}
+```
+
+Trạng thái session:
+
+```text
+Pending   : Viewer đã gửi yêu cầu, Host chưa phản hồi
+Accepted  : Host đã đồng ý
+Rejected  : Host đã từ chối
+Ended     : Phiên đã kết thúc
+```
+
+Kết quả:
+
+```text
+Viewer gửi yêu cầu điều khiển Host
+Host nhận request
+Host đồng ý hoặc từ chối
+Server quản lý session trong RAM
 ```
 
 ---
 
-## 4. Cấu trúc dự án hiện tại
+## Phase 3 — Truyền màn hình Host sang Viewer
+
+Mục tiêu:
+
+```text
+Host gửi frame màn hình lên server
+Server kiểm tra session đã Accepted
+Server relay frame tới đúng Viewer
+Viewer hiển thị màn hình
+Viewer thấy metadata màn hình và tọa độ chuột Host
+```
+
+Đã thực hiện:
+
+```text
+ScreenFrameDto
+SendScreenFrame()
+ReceiveScreenFrame
+MaximumReceiveMessageSize trong SignalR
+Fake screen streaming trong test-signalr.html
+```
+
+Dữ liệu frame gồm:
+
+```text
+SessionId
+ImageBase64
+ScreenWidth
+ScreenHeight
+FrameWidth
+FrameHeight
+MouseX
+MouseY
+SentAt
+```
+
+Lưu ý:
+
+```text
+Frame màn hình không lưu vào database
+Frame màn hình không lưu vào Firebase
+Frame chỉ relay realtime qua SignalR
+```
+
+---
+
+## Phase 4 — Relay chuột và bàn phím từ Viewer về Host
+
+Mục tiêu:
+
+```text
+Viewer thao tác chuột trên màn hình remote
+Viewer nhấn phím trên màn hình remote
+Server kiểm tra session Accepted
+Server relay mouse / keyboard event về đúng Host
+Host nhận và log event
+```
+
+Đã thực hiện:
+
+```text
+MouseEventDto
+KeyboardEventDto
+SendMouseEvent()
+SendKeyboardEvent()
+ReceiveMouseEvent
+ReceiveKeyboardEvent
+HTML test bắt mouse/keyboard trên remoteScreenWrapper
+```
+
+Mouse actions hiện hỗ trợ ở mức relay:
+
+```text
+MouseDown
+MouseUp
+MouseMove
+LeftClick
+RightClick
+DoubleClick
+Scroll
+```
+
+Keyboard actions hiện hỗ trợ ở mức relay:
+
+```text
+KeyDown
+KeyUp
+```
+
+Kết quả:
+
+```text
+Viewer click / right click / double click / scroll trên ảnh remote
+Server gửi event về Host
+Host nhận được ReceiveMouseEvent
+Viewer nhấn phím
+Host nhận được ReceiveKeyboardEvent
+```
+
+Ở Phase 4 hiện tại, Host mới **nhận và log event**, chưa thực thi chuột/phím thật trên máy tính.
+
+---
+
+## 4. Cấu trúc project hiện tại
 
 ```text
 remoteControllerApp/
@@ -113,12 +264,15 @@ remoteControllerApp/
 │   └── SessionController.cs
 │
 ├── DTOs/
-│   ├── HostRegisterDto.cs
-│   ├── ViewerRegisterDto.cs
 │   ├── ConnectionInfoDto.cs
 │   ├── ControlRequestDto.cs
 │   ├── ControlResponseDto.cs
-│   └── SessionInfoDto.cs
+│   ├── HostRegisterDto.cs
+│   ├── KeyboardEventDto.cs
+│   ├── MouseEventDto.cs
+│   ├── ScreenFrameDto.cs
+│   ├── SessionInfoDto.cs
+│   └── ViewerRegisterDto.cs
 │
 ├── Hubs/
 │   └── RemoteHub.cs
@@ -129,8 +283,8 @@ remoteControllerApp/
 │
 ├── Models/
 │   ├── HostConnection.cs
-│   ├── ViewerConnection.cs
-│   └── RemoteSession.cs
+│   ├── RemoteSession.cs
+│   └── ViewerConnection.cs
 │
 ├── Repositories/
 │
@@ -149,65 +303,55 @@ remoteControllerApp/
 
 ---
 
-# 5. Chức năng từng thư mục
+## 5. Chức năng từng thư mục
 
-## 5.1. Controllers/
+## Controllers/
 
-Thư mục này chứa các REST API thông thường.
+Chứa REST API để kiểm tra trạng thái hệ thống.
 
-REST API dùng để:
-
-- Kiểm tra danh sách Host online.
-- Kiểm tra danh sách Viewer online.
-- Kiểm tra danh sách session.
-- Debug trạng thái server.
-
-Các controller hiện tại:
+Hiện có:
 
 ```text
 ConnectionController.cs
 SessionController.cs
 ```
 
----
-
-## 5.2. DTOs/
-
-DTO là viết tắt của **Data Transfer Object**.
-
-Thư mục này chứa các object dùng để truyền dữ liệu giữa:
+Dùng cho:
 
 ```text
-Client <-> Server
+Xem Host online
+Xem Viewer online
+Xem session
+Debug quá trình test
 ```
-
-Ví dụ:
-
-- Host gửi thông tin đăng ký lên server.
-- Viewer gửi yêu cầu điều khiển Host.
-- Host gửi phản hồi accept/reject.
-- Server trả danh sách connection/session cho API.
-
-DTO không nên chứa business logic.
 
 ---
 
-## 5.3. Hubs/
+## DTOs/
 
-Thư mục này chứa SignalR Hub.
+Chứa object truyền dữ liệu giữa client và server.
 
-SignalR Hub là phần quan trọng nhất của server.
+Hiện có:
 
-Nhiệm vụ:
+```text
+HostRegisterDto
+ViewerRegisterDto
+ConnectionInfoDto
+ControlRequestDto
+ControlResponseDto
+SessionInfoDto
+ScreenFrameDto
+MouseEventDto
+KeyboardEventDto
+```
 
-- Nhận kết nối realtime từ Host/Viewer.
-- Xử lý đăng ký Host.
-- Xử lý đăng ký Viewer.
-- Nhận yêu cầu điều khiển từ Viewer.
-- Gửi request đến Host.
-- Nhận accept/reject từ Host.
-- Gửi kết quả về Viewer.
-- Xử lý disconnect.
+DTO không chứa business logic. DTO chỉ mô tả dữ liệu gửi/nhận.
+
+---
+
+## Hubs/
+
+Chứa SignalR Hub.
 
 File chính:
 
@@ -215,31 +359,41 @@ File chính:
 RemoteHub.cs
 ```
 
+Đây là phần realtime trung tâm của hệ thống.
+
+Xử lý:
+
+```text
+Register Host
+Register Viewer
+Request control
+Accept / Reject control
+End control
+Send screen frame
+Send mouse event
+Send keyboard event
+```
+
 ---
 
-## 5.4. Manager/
+## Manager/
 
-Thư mục này chứa các class quản lý trạng thái realtime trong RAM.
+Chứa các class quản lý trạng thái trong RAM.
 
-Hiện tại có:
+Hiện có:
 
 ```text
 ConnectionManager.cs
 SessionManager.cs
 ```
 
-Manager không làm việc với database.  
-Manager chỉ giữ dữ liệu tạm khi app đang chạy.
-
-Nếu server restart, dữ liệu trong Manager sẽ mất.
+Dữ liệu trong Manager sẽ mất khi restart server.
 
 ---
 
-## 5.5. Models/
+## Models/
 
-Thư mục này chứa các model chính của hệ thống.
-
-Model thể hiện các thực thể trong domain:
+Chứa model chính của hệ thống:
 
 ```text
 HostConnection
@@ -247,26 +401,13 @@ ViewerConnection
 RemoteSession
 ```
 
-Các model này được dùng bởi Manager và Service.
-
 ---
 
-## 5.6. Services/
+## Services/
 
-Thư mục này chứa business logic.
+Chứa business logic trung gian giữa Controller/Hub và Manager.
 
-Service đóng vai trò trung gian giữa:
-
-```text
-Controller / Hub
-        |
-        v
-Manager
-```
-
-Service giúp code rõ ràng hơn, tránh để toàn bộ logic trong Hub hoặc Controller.
-
-Hiện tại có:
+Hiện có:
 
 ```text
 ConnectionService.cs
@@ -275,81 +416,77 @@ SessionService.cs
 
 ---
 
-## 5.7. Repositories/
+## Repositories/
 
-Thư mục này hiện tại chưa sử dụng.
+Hiện chưa dùng.
 
-Sau này nếu tích hợp database như Firebase, SQL Server hoặc PostgreSQL, có thể dùng thư mục này để chứa các class xử lý đọc/ghi dữ liệu.
-
-Ví dụ sau này có thể thêm:
+Sau này nếu tích hợp Firebase hoặc database khác, có thể thêm:
 
 ```text
-UserRepository.cs
-HostRepository.cs
-SessionRepository.cs
-ActivityLogRepository.cs
+UserRepository
+HostRepository
+SessionRepository
+ActivityLogRepository
+PermissionRepository
 ```
 
 ---
 
-## 5.8. wwwroot/
+## wwwroot/
 
-Thư mục này chứa static file.
+Chứa static file test.
 
-Hiện tại có file:
+Hiện có:
 
 ```text
 test-signalr.html
 ```
 
-File này dùng để test SignalR bằng trình duyệt.
-
-Nó đóng vai trò client giả lập:
+File này là client test tạm thời cho:
 
 ```text
 Host giả lập
 Viewer giả lập
+Screen streaming giả lập
+Mouse event giả lập
+Keyboard event giả lập
 ```
-
-Không phải app chính thức, chỉ là tool test nhanh trong quá trình phát triển.
 
 ---
 
-# 6. Chức năng từng file
+## 6. Chức năng từng file chính
 
-## 6.1. Program.cs
-
-File khởi động chính của ASP.NET Core app.
+## Program.cs
 
 Chức năng:
 
-- Đăng ký Controller.
-- Đăng ký SignalR.
-- Đăng ký Dependency Injection.
-- Đăng ký static files.
-- Map REST API.
-- Map SignalR Hub endpoint.
-
-Các cấu hình chính:
-
-```csharp
-builder.Services.AddControllers();
-builder.Services.AddSignalR();
-
-builder.Services.AddSingleton<ConnectionManager>();
-builder.Services.AddSingleton<SessionManager>();
-
-builder.Services.AddScoped<ConnectionService>();
-builder.Services.AddScoped<SessionService>();
-
-app.UseDefaultFiles();
-app.UseStaticFiles();
-
-app.MapControllers();
-app.MapHub<RemoteHub>("/remoteHub");
+```text
+Đăng ký Controllers
+Đăng ký SignalR
+Tăng MaximumReceiveMessageSize
+Đăng ký ConnectionManager / SessionManager
+Đăng ký ConnectionService / SessionService
+Bật static files
+Map Controllers
+Map RemoteHub
 ```
 
-Endpoint SignalR chính:
+Cấu hình quan trọng:
+
+```csharp
+builder.Services.AddSignalR(options =>
+{
+    options.MaximumReceiveMessageSize = 10 * 1024 * 1024;
+});
+```
+
+Mục đích:
+
+```text
+Cho phép gửi frame ảnh Base64 lớn hơn giới hạn mặc định 32KB của SignalR
+```
+
+Endpoint chính:
 
 ```text
 /remoteHub
@@ -357,552 +494,268 @@ Endpoint SignalR chính:
 
 ---
 
-## 6.2. Hubs/RemoteHub.cs
+## Hubs/RemoteHub.cs
 
-Đây là file xử lý realtime chính.
+File xử lý realtime chính.
 
-Các method hiện có:
+Method hiện có:
 
 ```text
 OnConnectedAsync()
 OnDisconnectedAsync()
-
 RegisterHost()
 RegisterViewer()
-
 PingHost()
 PingViewer()
-
 RequestControl()
 AcceptControl()
 RejectControl()
 EndControl()
-```
-
-### OnConnectedAsync()
-
-Được gọi khi client kết nối vào SignalR server.
-
-Tác dụng:
-
-- Log `connectionId`.
-- Xác nhận client đã kết nối.
-
----
-
-### OnDisconnectedAsync()
-
-Được gọi khi client ngắt kết nối.
-
-Tác dụng:
-
-- Đánh dấu Host/Viewer offline.
-- Kết thúc các session liên quan đến connection bị ngắt.
-- Log trạng thái disconnect.
-
----
-
-### RegisterHost()
-
-Được Host gọi khi mở app và muốn đăng ký online.
-
-Input:
-
-```csharp
-HostRegisterDto
-```
-
-Server sẽ lưu:
-
-```text
-HostId
-ConnectionId
-ComputerName
-ConnectedAt
-LastSeenAt
-IsOnline
-```
-
-Sau khi đăng ký thành công, server gửi event:
-
-```text
-RegisterHostSuccess
-```
-
-Nếu thất bại:
-
-```text
-RegisterHostFailed
+SendScreenFrame()
+SendMouseEvent()
+SendKeyboardEvent()
 ```
 
 ---
 
-### RegisterViewer()
+## Manager/ConnectionManager.cs
 
-Được Viewer gọi khi mở app và muốn đăng ký online.
+Quản lý trạng thái online của Host và Viewer.
 
-Input:
-
-```csharp
-ViewerRegisterDto
-```
-
-Server sẽ lưu:
-
-```text
-ViewerId
-ConnectionId
-ViewerName
-ConnectedAt
-LastSeenAt
-IsOnline
-```
-
-Sau khi đăng ký thành công, server gửi event:
-
-```text
-RegisterViewerSuccess
-```
-
-Nếu thất bại:
-
-```text
-RegisterViewerFailed
-```
-
----
-
-### PingHost()
-
-Host gọi định kỳ để báo vẫn còn sống.
-
-Tác dụng:
-
-- Cập nhật `LastSeenAt`.
-- Trả về event `Pong`.
-
----
-
-### PingViewer()
-
-Viewer gọi định kỳ để báo vẫn còn sống.
-
-Tác dụng:
-
-- Cập nhật `LastSeenAt`.
-- Trả về event `Pong`.
-
----
-
-### RequestControl()
-
-Viewer gọi method này để yêu cầu điều khiển một Host.
-
-Input:
-
-```csharp
-ControlRequestDto
-```
-
-Luồng xử lý:
-
-```text
-Viewer gọi RequestControl()
-Server kiểm tra Host online
-Server kiểm tra Viewer online
-Server tạo RemoteSession trạng thái Pending
-Server gửi ReceiveControlRequest đến Host
-Server gửi ControlRequestSent về Viewer
-```
-
-Event gửi đến Host:
-
-```text
-ReceiveControlRequest
-```
-
-Event gửi về Viewer:
-
-```text
-ControlRequestSent
-```
-
-Nếu lỗi:
-
-```text
-ControlRequestFailed
-```
-
----
-
-### AcceptControl()
-
-Host gọi khi chấp nhận yêu cầu điều khiển.
-
-Input:
-
-```csharp
-ControlResponseDto
-```
-
-Luồng xử lý:
-
-```text
-Host gọi AcceptControl()
-Server tìm session
-Server đổi trạng thái session thành Accepted
-Server gửi ControlAccepted về Viewer
-Server gửi AcceptControlSuccess về Host
-```
-
-Event gửi về Viewer:
-
-```text
-ControlAccepted
-```
-
-Event gửi về Host:
-
-```text
-AcceptControlSuccess
-```
-
-Nếu lỗi:
-
-```text
-AcceptControlFailed
-```
-
----
-
-### RejectControl()
-
-Host gọi khi từ chối yêu cầu điều khiển.
-
-Input:
-
-```csharp
-ControlResponseDto
-```
-
-Luồng xử lý:
-
-```text
-Host gọi RejectControl()
-Server tìm session
-Server đổi trạng thái session thành Rejected
-Server lưu RejectReason
-Server gửi ControlRejected về Viewer
-Server gửi RejectControlSuccess về Host
-```
-
-Event gửi về Viewer:
-
-```text
-ControlRejected
-```
-
-Event gửi về Host:
-
-```text
-RejectControlSuccess
-```
-
-Nếu lỗi:
-
-```text
-RejectControlFailed
-```
-
----
-
-### EndControl()
-
-Viewer hoặc Host gọi khi muốn kết thúc phiên điều khiển.
-
-Input:
-
-```csharp
-string sessionId
-```
-
-Luồng xử lý:
-
-```text
-Client gọi EndControl(sessionId)
-Server tìm session
-Server đổi trạng thái session thành Ended
-Server gửi ControlEnded đến cả Host và Viewer
-```
-
-Event gửi đến cả hai phía:
-
-```text
-ControlEnded
-```
-
-Nếu lỗi:
-
-```text
-EndControlFailed
-```
-
----
-
-## 6.3. Manager/ConnectionManager.cs
-
-File này quản lý trạng thái online của Host và Viewer trong RAM.
-
-Dữ liệu đang lưu:
+Lưu trong RAM:
 
 ```text
 HostId -> HostConnection
 ViewerId -> ViewerConnection
 ```
 
-Các method chính:
+Method chính:
 
 ```text
 AddOrUpdateHost()
 AddOrUpdateViewer()
-
 GetHostById()
 GetViewerById()
-
 GetHostByConnectionId()
 GetViewerByConnectionId()
-
 GetOnlineHosts()
 GetOnlineViewers()
-
 MarkDisconnected()
-
 UpdateHostLastSeen()
 UpdateViewerLastSeen()
 ```
 
-### AddOrUpdateHost()
-
-Thêm mới hoặc cập nhật Host đang online.
-
-Dùng khi Host gọi:
-
-```text
-RegisterHost()
-```
-
 ---
 
-### AddOrUpdateViewer()
+## Manager/SessionManager.cs
 
-Thêm mới hoặc cập nhật Viewer đang online.
+Quản lý session điều khiển trong RAM.
 
-Dùng khi Viewer gọi:
-
-```text
-RegisterViewer()
-```
-
----
-
-### GetHostById()
-
-Tìm Host theo `hostId`.
-
-Dùng khi Viewer gửi request điều khiển Host.
-
----
-
-### GetViewerById()
-
-Tìm Viewer theo `viewerId`.
-
-Dùng khi tạo session điều khiển.
-
----
-
-### MarkDisconnected()
-
-Khi một connection bị ngắt, method này kiểm tra connection đó thuộc Host hay Viewer, sau đó đánh dấu offline.
-
----
-
-### UpdateHostLastSeen()
-
-Cập nhật thời điểm Host gần nhất còn sống.
-
----
-
-### UpdateViewerLastSeen()
-
-Cập nhật thời điểm Viewer gần nhất còn sống.
-
----
-
-## 6.4. Manager/SessionManager.cs
-
-File này quản lý session điều khiển trong RAM.
-
-Dữ liệu đang lưu:
+Lưu:
 
 ```text
 SessionId -> RemoteSession
 ```
 
-Các method chính:
+Method chính:
 
 ```text
 CreateSession()
 GetSessionById()
+GetAcceptedSession()
 GetAllSessions()
 GetActiveSessions()
-
 AcceptSession()
 RejectSession()
 EndSession()
 EndSessionsByConnectionId()
 ```
 
-### CreateSession()
-
-Tạo một phiên điều khiển mới với trạng thái:
-
-```text
-Pending
-```
-
-Được gọi khi Viewer yêu cầu điều khiển Host.
+`GetAcceptedSession()` được dùng ở Phase 3 và Phase 4 để đảm bảo chỉ relay dữ liệu khi Host đã đồng ý điều khiển.
 
 ---
 
-### AcceptSession()
+## Services/ConnectionService.cs
 
-Đổi trạng thái session thành:
+Trả dữ liệu Host/Viewer online cho REST API.
 
-```text
-Accepted
-```
-
-Được gọi khi Host đồng ý cho Viewer điều khiển.
-
----
-
-### RejectSession()
-
-Đổi trạng thái session thành:
-
-```text
-Rejected
-```
-
-Đồng thời lưu lý do từ chối nếu có.
-
----
-
-### EndSession()
-
-Đổi trạng thái session thành:
-
-```text
-Ended
-```
-
-Được gọi khi Viewer hoặc Host kết thúc phiên.
-
----
-
-### EndSessionsByConnectionId()
-
-Khi Host hoặc Viewer disconnect, server tự động kết thúc các session liên quan đến connection đó.
-
----
-
-## 6.5. Services/ConnectionService.cs
-
-Service này xử lý logic liên quan đến kết nối Host/Viewer.
-
-Các method chính:
+Method chính:
 
 ```text
 GetOnlineHosts()
 GetOnlineViewers()
 ```
 
-Nó lấy dữ liệu từ `ConnectionManager`, sau đó convert sang `ConnectionInfoDto` để trả về API.
-
 ---
 
-## 6.6. Services/SessionService.cs
+## Services/SessionService.cs
 
-Service này xử lý logic liên quan đến session điều khiển.
+Xử lý logic session.
 
-Các method chính:
+Method chính:
 
 ```text
 CreateControlRequest()
 AcceptSession()
 RejectSession()
 EndSession()
-
 GetAllSessions()
 GetActiveSessions()
 GetSessionById()
 ```
 
-### CreateControlRequest()
-
-Luồng xử lý:
-
-```text
-Kiểm tra Host có online không
-Kiểm tra Viewer có online không
-Tạo session Pending
-Trả session về RemoteHub
-```
-
-Nếu Host hoặc Viewer không online, method sẽ throw lỗi.
-
 ---
 
-### GetAllSessions()
+## Controllers/ConnectionController.cs
 
-Trả về toàn bộ session trong RAM.
+REST API kiểm tra Host/Viewer online.
 
----
-
-### GetActiveSessions()
-
-Trả về các session đang ở trạng thái:
-
-```text
-Pending
-Accepted
-```
-
----
-
-### GetSessionById()
-
-Trả về chi tiết một session theo `sessionId`.
-
----
-
-## 6.7. Controllers/ConnectionController.cs
-
-REST API kiểm tra trạng thái kết nối.
-
-Endpoint:
+Endpoints:
 
 ```text
 GET /api/Connection/hosts
 GET /api/Connection/viewers
 ```
 
-### GET /api/Connection/hosts
+---
 
-Trả danh sách Host đang online.
+## Controllers/SessionController.cs
 
-Ví dụ response:
+REST API kiểm tra session.
+
+Endpoints:
+
+```text
+GET /api/Session
+GET /api/Session/active
+GET /api/Session/{sessionId}
+```
+
+---
+
+## DTOs/ScreenFrameDto.cs
+
+Dùng khi Host gửi frame màn hình lên server.
+
+Fields:
+
+```text
+SessionId
+ImageBase64
+ScreenWidth
+ScreenHeight
+FrameWidth
+FrameHeight
+MouseX
+MouseY
+SentAt
+```
+
+---
+
+## DTOs/MouseEventDto.cs
+
+Dùng khi Viewer gửi thao tác chuột về Host.
+
+Fields:
+
+```text
+SessionId
+Action
+X
+Y
+ScreenWidth
+ScreenHeight
+Button
+Delta
+SentAt
+```
+
+Action có thể là:
+
+```text
+MouseDown
+MouseUp
+MouseMove
+LeftClick
+RightClick
+DoubleClick
+Scroll
+```
+
+---
+
+## DTOs/KeyboardEventDto.cs
+
+Dùng khi Viewer gửi thao tác bàn phím về Host.
+
+Fields:
+
+```text
+SessionId
+Action
+Key
+Code
+CtrlKey
+ShiftKey
+AltKey
+SentAt
+```
+
+Action có thể là:
+
+```text
+KeyDown
+KeyUp
+```
+
+---
+
+## wwwroot/test-signalr.html
+
+File test bằng browser.
+
+Chức năng:
+
+```text
+Connect SignalR
+Register Host
+Register Viewer
+Ping Host
+Ping Viewer
+Request Control
+Accept Control
+Reject Control
+End Control
+Send fake screen frame
+Start fake screen streaming
+Stop fake screen streaming
+Click / right click / double click / scroll trên remote screen
+Gửi keyboard event
+Mở REST API kiểm tra
+```
+
+Ghi chú:
+
+```text
+Fake screen được tạo bằng canvas
+Ảnh gửi bằng JPEG Base64
+Chuột Host fake đứng yên ở giữa màn hình
+Mouse event được bắt trên remoteScreenWrapper
+Keyboard event hoạt động khi focus vào remoteScreenWrapper
+```
+
+---
+
+# 7. REST API hiện có
+
+## 7.1. Connection APIs
+
+## GET `/api/Connection/hosts`
+
+Lấy danh sách Host đang online.
+
+Response ví dụ:
 
 ```json
 [
@@ -917,13 +770,20 @@ Ví dụ response:
 ]
 ```
 
+Dùng để kiểm tra:
+
+```text
+Host đã RegisterHost thành công chưa
+Host còn online không
+```
+
 ---
 
-### GET /api/Connection/viewers
+## GET `/api/Connection/viewers`
 
-Trả danh sách Viewer đang online.
+Lấy danh sách Viewer đang online.
 
-Ví dụ response:
+Response ví dụ:
 
 ```json
 [
@@ -938,30 +798,27 @@ Ví dụ response:
 ]
 ```
 
----
-
-## 6.8. Controllers/SessionController.cs
-
-REST API kiểm tra session.
-
-Endpoint:
+Dùng để kiểm tra:
 
 ```text
-GET /api/Session
-GET /api/Session/active
-GET /api/Session/{sessionId}
+Viewer đã RegisterViewer thành công chưa
+Viewer còn online không
 ```
 
-### GET /api/Session
+---
 
-Trả về tất cả session.
+## 7.2. Session APIs
 
-Ví dụ:
+## GET `/api/Session`
+
+Lấy tất cả session trong RAM.
+
+Response ví dụ:
 
 ```json
 [
   {
-    "sessionId": "47324479dfe4eeab222f265edd486d2",
+    "sessionId": "923dcb05cc5a48c7adc04359202014d4",
     "hostId": "HOST_001",
     "viewerId": "VIEWER_001",
     "status": "Accepted",
@@ -974,138 +831,92 @@ Ví dụ:
 ]
 ```
 
+Dùng để kiểm tra:
+
+```text
+Session đã được tạo chưa
+Session đang Pending / Accepted / Rejected / Ended
+```
+
 ---
 
-### GET /api/Session/active
+## GET `/api/Session/active`
 
-Trả về các session đang active.
+Lấy các session đang hoạt động.
 
-Active bao gồm:
+Active gồm:
 
 ```text
 Pending
 Accepted
 ```
 
----
-
-### GET /api/Session/{sessionId}
-
-Trả về chi tiết một session theo `sessionId`.
-
-Nếu không tìm thấy, trả về `404 Not Found`.
-
----
-
-## 6.9. Models/HostConnection.cs
-
-Model đại diện cho một Host đang kết nối.
-
-Các field:
+Không gồm:
 
 ```text
-HostId
-ConnectionId
-ComputerName
-ConnectedAt
-LastSeenAt
-IsOnline
-```
-
-Ý nghĩa:
-
-- `HostId`: mã định danh của máy bị điều khiển.
-- `ConnectionId`: mã kết nối SignalR hiện tại.
-- `ComputerName`: tên máy.
-- `ConnectedAt`: thời điểm kết nối.
-- `LastSeenAt`: lần cuối Host ping server.
-- `IsOnline`: trạng thái online/offline.
-
----
-
-## 6.10. Models/ViewerConnection.cs
-
-Model đại diện cho một Viewer đang kết nối.
-
-Các field:
-
-```text
-ViewerId
-ConnectionId
-ViewerName
-ConnectedAt
-LastSeenAt
-IsOnline
-```
-
-Ý nghĩa:
-
-- `ViewerId`: mã định danh của máy điều khiển.
-- `ConnectionId`: mã kết nối SignalR hiện tại.
-- `ViewerName`: tên Viewer.
-- `ConnectedAt`: thời điểm kết nối.
-- `LastSeenAt`: lần cuối Viewer ping server.
-- `IsOnline`: trạng thái online/offline.
-
----
-
-## 6.11. Models/RemoteSession.cs
-
-Model đại diện cho phiên điều khiển từ xa.
-
-Các field:
-
-```text
-SessionId
-HostId
-ViewerId
-HostConnectionId
-ViewerConnectionId
-Status
-CreatedAt
-AcceptedAt
-RejectedAt
-EndedAt
-RejectReason
-```
-
-Trạng thái session:
-
-```text
-Pending
-Accepted
 Rejected
 Ended
 ```
 
-Ý nghĩa:
+---
 
-- `SessionId`: mã phiên điều khiển.
-- `HostId`: máy bị điều khiển.
-- `ViewerId`: máy điều khiển.
-- `HostConnectionId`: connectionId của Host.
-- `ViewerConnectionId`: connectionId của Viewer.
-- `Status`: trạng thái session.
-- `CreatedAt`: thời điểm tạo session.
-- `AcceptedAt`: thời điểm Host chấp nhận.
-- `RejectedAt`: thời điểm Host từ chối.
-- `EndedAt`: thời điểm kết thúc session.
-- `RejectReason`: lý do từ chối nếu có.
+## GET `/api/Session/{sessionId}`
+
+Lấy chi tiết một session theo `sessionId`.
+
+Nếu không tìm thấy:
+
+```json
+{
+  "message": "Session not found."
+}
+```
 
 ---
 
-## 6.12. DTOs/HostRegisterDto.cs
+# 8. SignalR Hub endpoint
 
-DTO dùng khi Host đăng ký lên server.
-
-Field:
+## Endpoint
 
 ```text
-HostId
-ComputerName
+/remoteHub
 ```
 
-Ví dụ request:
+URL local thường dùng:
+
+```text
+http://localhost:5271/remoteHub
+```
+
+Lưu ý:
+
+```text
+Không mở trực tiếp /remoteHub bằng browser
+SignalR client phải kết nối qua thư viện client
+```
+
+HTML test kết nối bằng:
+
+```javascript
+connection = new signalR.HubConnectionBuilder()
+    .withUrl("/remoteHub")
+    .withAutomaticReconnect()
+    .build();
+```
+
+---
+
+# 9. SignalR methods client gọi lên server
+
+## 9.1. RegisterHost
+
+Host gọi để đăng ký online.
+
+```text
+RegisterHost(HostRegisterDto request)
+```
+
+Payload:
 
 ```json
 {
@@ -1114,20 +925,24 @@ Ví dụ request:
 }
 ```
 
----
-
-## 6.13. DTOs/ViewerRegisterDto.cs
-
-DTO dùng khi Viewer đăng ký lên server.
-
-Field:
+Server trả event:
 
 ```text
-ViewerId
-ViewerName
+RegisterHostSuccess
+RegisterHostFailed
 ```
 
-Ví dụ request:
+---
+
+## 9.2. RegisterViewer
+
+Viewer gọi để đăng ký online.
+
+```text
+RegisterViewer(ViewerRegisterDto request)
+```
+
+Payload:
 
 ```json
 {
@@ -1136,45 +951,56 @@ Ví dụ request:
 }
 ```
 
----
-
-## 6.14. DTOs/ConnectionInfoDto.cs
-
-DTO dùng để trả thông tin Host/Viewer online qua API.
-
-Field:
+Server trả event:
 
 ```text
-Id
-ConnectionId
-Name
-IsOnline
-ConnectedAt
-LastSeenAt
-```
-
-Dùng bởi:
-
-```text
-ConnectionController
-ConnectionService
+RegisterViewerSuccess
+RegisterViewerFailed
 ```
 
 ---
 
-## 6.15. DTOs/ControlRequestDto.cs
+## 9.3. PingHost
 
-DTO dùng khi Viewer gửi yêu cầu điều khiển Host.
-
-Field:
+Host ping để cập nhật `LastSeenAt`.
 
 ```text
-HostId
-ViewerId
-ViewerName
+PingHost(hostId)
 ```
 
-Ví dụ:
+Server trả:
+
+```text
+Pong
+```
+
+---
+
+## 9.4. PingViewer
+
+Viewer ping để cập nhật `LastSeenAt`.
+
+```text
+PingViewer(viewerId)
+```
+
+Server trả:
+
+```text
+Pong
+```
+
+---
+
+## 9.5. RequestControl
+
+Viewer gửi yêu cầu điều khiển Host.
+
+```text
+RequestControl(ControlRequestDto request)
+```
+
+Payload:
 
 ```json
 {
@@ -1184,401 +1010,464 @@ Ví dụ:
 }
 ```
 
+Server gửi tới Host:
+
+```text
+ReceiveControlRequest
+```
+
+Server gửi về Viewer:
+
+```text
+ControlRequestSent
+ControlRequestFailed
+```
+
 ---
 
-## 6.16. DTOs/ControlResponseDto.cs
+## 9.6. AcceptControl
 
-DTO dùng khi Host phản hồi yêu cầu điều khiển.
-
-Field:
+Host chấp nhận yêu cầu điều khiển.
 
 ```text
-SessionId
-Accepted
-Reason
+AcceptControl(ControlResponseDto response)
 ```
 
-Dùng cho cả:
-
-```text
-AcceptControl()
-RejectControl()
-```
-
-Ví dụ Accept:
+Payload:
 
 ```json
 {
-  "sessionId": "47324479dfe4eeab222f265edd486d2",
+  "sessionId": "923dcb05cc5a48c7adc04359202014d4",
   "accepted": true,
   "reason": null
 }
 ```
 
-Ví dụ Reject:
+Server gửi về Viewer:
+
+```text
+ControlAccepted
+```
+
+Server gửi về Host:
+
+```text
+AcceptControlSuccess
+AcceptControlFailed
+```
+
+---
+
+## 9.7. RejectControl
+
+Host từ chối yêu cầu điều khiển.
+
+```text
+RejectControl(ControlResponseDto response)
+```
+
+Payload:
 
 ```json
 {
-  "sessionId": "47324479dfe4eeab222f265edd486d2",
+  "sessionId": "923dcb05cc5a48c7adc04359202014d4",
   "accepted": false,
   "reason": "Host rejected the request."
 }
 ```
 
----
-
-## 6.17. DTOs/SessionInfoDto.cs
-
-DTO dùng để trả thông tin session qua REST API.
-
-Field:
+Server gửi về Viewer:
 
 ```text
-SessionId
-HostId
-ViewerId
-Status
-CreatedAt
-AcceptedAt
-RejectedAt
-EndedAt
-RejectReason
-```
-
-Dùng bởi:
-
-```text
-SessionController
-SessionService
-```
-
----
-
-## 6.18. wwwroot/test-signalr.html
-
-File HTML dùng để test SignalR bằng trình duyệt.
-
-Chức năng:
-
-- Connect SignalR.
-- Register Host.
-- Register Viewer.
-- Ping Host.
-- Ping Viewer.
-- Viewer gửi Request Control.
-- Host Accept Control.
-- Host Reject Control.
-- Host/Viewer End Control.
-- Mở API kiểm tra Host/Viewer/Session.
-
-Cách dùng:
-
-Mở 2 tab trình duyệt:
-
-```text
-http://localhost:5271/test-signalr.html
-```
-
-Tab 1 giả lập Host:
-
-```text
-Connect SignalR
-Register Host
-Nhận ReceiveControlRequest
-Accept hoặc Reject
-```
-
-Tab 2 giả lập Viewer:
-
-```text
-Connect SignalR
-Register Viewer
-Request Control
-Nhận ControlAccepted hoặc ControlRejected
-End Control
-```
-
----
-
-# 7. Luồng hoạt động Phase 1
-
-## 7.1. Host đăng ký online
-
-```text
-Host Client
-   |
-   | RegisterHost(hostId, computerName)
-   v
-RemoteHub
-   |
-   | AddOrUpdateHost()
-   v
-ConnectionManager
-   |
-   | RegisterHostSuccess
-   v
-Host Client
-```
-
----
-
-## 7.2. Viewer đăng ký online
-
-```text
-Viewer Client
-   |
-   | RegisterViewer(viewerId, viewerName)
-   v
-RemoteHub
-   |
-   | AddOrUpdateViewer()
-   v
-ConnectionManager
-   |
-   | RegisterViewerSuccess
-   v
-Viewer Client
-```
-
----
-
-## 7.3. Kiểm tra danh sách online
-
-```text
-Browser / Postman
-   |
-   | GET /api/Connection/hosts
-   v
-ConnectionController
-   |
-   v
-ConnectionService
-   |
-   v
-ConnectionManager
-   |
-   v
-JSON response
-```
-
----
-
-# 8. Luồng hoạt động Phase 2
-
-## 8.1. Viewer gửi yêu cầu điều khiển
-
-```text
-Viewer
-   |
-   | RequestControl(hostId, viewerId, viewerName)
-   v
-RemoteHub
-   |
-   v
-SessionService
-   |
-   | kiểm tra Host online
-   | kiểm tra Viewer online
-   v
-SessionManager
-   |
-   | tạo session Pending
-   v
-RemoteHub
-   |
-   | ReceiveControlRequest
-   v
-Host
-```
-
-Đồng thời Viewer nhận:
-
-```text
-ControlRequestSent
-```
-
----
-
-## 8.2. Host chấp nhận điều khiển
-
-```text
-Host
-   |
-   | AcceptControl(sessionId)
-   v
-RemoteHub
-   |
-   v
-SessionService / SessionManager
-   |
-   | đổi status = Accepted
-   v
-RemoteHub
-   |
-   | ControlAccepted
-   v
-Viewer
-```
-
-Host nhận lại:
-
-```text
-AcceptControlSuccess
-```
-
----
-
-## 8.3. Host từ chối điều khiển
-
-```text
-Host
-   |
-   | RejectControl(sessionId, reason)
-   v
-RemoteHub
-   |
-   v
-SessionService / SessionManager
-   |
-   | đổi status = Rejected
-   v
-RemoteHub
-   |
-   | ControlRejected
-   v
-Viewer
-```
-
-Host nhận lại:
-
-```text
-RejectControlSuccess
-```
-
----
-
-## 8.4. Kết thúc phiên điều khiển
-
-```text
-Viewer hoặc Host
-   |
-   | EndControl(sessionId)
-   v
-RemoteHub
-   |
-   v
-SessionManager
-   |
-   | đổi status = Ended
-   v
-RemoteHub
-   |
-   | ControlEnded
-   v
-Host + Viewer
-```
-
----
-
-# 9. Các event SignalR đang dùng
-
-## Client gọi lên Server
-
-```text
-RegisterHost
-RegisterViewer
-PingHost
-PingViewer
-RequestControl
-AcceptControl
-RejectControl
-EndControl
-```
-
----
-
-## Server gửi về Client
-
-```text
-RegisterHostSuccess
-RegisterHostFailed
-
-RegisterViewerSuccess
-RegisterViewerFailed
-
-Pong
-
-ReceiveControlRequest
-ControlRequestSent
-ControlRequestFailed
-
-ControlAccepted
 ControlRejected
+```
 
-AcceptControlSuccess
-AcceptControlFailed
+Server gửi về Host:
 
+```text
 RejectControlSuccess
 RejectControlFailed
+```
 
+---
+
+## 9.8. EndControl
+
+Host hoặc Viewer kết thúc session.
+
+```text
+EndControl(sessionId)
+```
+
+Payload:
+
+```text
+"923dcb05cc5a48c7adc04359202014d4"
+```
+
+Server gửi tới cả Host và Viewer:
+
+```text
 ControlEnded
 EndControlFailed
 ```
 
 ---
 
-# 10. Các REST API hiện có
+## 9.9. SendScreenFrame
 
-## Connection API
+Host gửi frame màn hình sang Viewer.
 
 ```text
-GET /api/Connection/hosts
-GET /api/Connection/viewers
+SendScreenFrame(ScreenFrameDto request)
+```
+
+Payload:
+
+```json
+{
+  "sessionId": "923dcb05cc5a48c7adc04359202014d4",
+  "imageBase64": "...",
+  "screenWidth": 1920,
+  "screenHeight": 1080,
+  "frameWidth": 960,
+  "frameHeight": 540,
+  "mouseX": 960,
+  "mouseY": 540,
+  "sentAt": "2026-05-10T05:20:00Z"
+}
+```
+
+Server gửi tới Viewer:
+
+```text
+ReceiveScreenFrame
+```
+
+Server gửi lỗi về Host:
+
+```text
+SendScreenFrameFailed
+```
+
+Điều kiện relay:
+
+```text
+Session phải có status = Accepted
 ```
 
 ---
 
-## Session API
+## 9.10. SendMouseEvent
+
+Viewer gửi thao tác chuột về Host.
 
 ```text
-GET /api/Session
-GET /api/Session/active
-GET /api/Session/{sessionId}
+SendMouseEvent(MouseEventDto request)
+```
+
+Payload ví dụ click trái:
+
+```json
+{
+  "sessionId": "923dcb05cc5a48c7adc04359202014d4",
+  "action": "LeftClick",
+  "x": 960,
+  "y": 540,
+  "screenWidth": 1920,
+  "screenHeight": 1080,
+  "button": "Left",
+  "delta": 0,
+  "sentAt": "2026-05-10T05:21:00Z"
+}
+```
+
+Payload ví dụ scroll:
+
+```json
+{
+  "sessionId": "923dcb05cc5a48c7adc04359202014d4",
+  "action": "Scroll",
+  "x": 960,
+  "y": 540,
+  "screenWidth": 1920,
+  "screenHeight": 1080,
+  "button": "Wheel",
+  "delta": -120,
+  "sentAt": "2026-05-10T05:21:00Z"
+}
+```
+
+Server gửi tới Host:
+
+```text
+ReceiveMouseEvent
+```
+
+Server gửi lỗi về Viewer:
+
+```text
+SendMouseEventFailed
+```
+
+Điều kiện relay:
+
+```text
+Session phải có status = Accepted
 ```
 
 ---
 
-# 11. Cách chạy project
+## 9.11. SendKeyboardEvent
 
-## 11.1. Chạy server
+Viewer gửi thao tác bàn phím về Host.
 
-Chạy bằng Visual Studio hoặc terminal:
+```text
+SendKeyboardEvent(KeyboardEventDto request)
+```
+
+Payload ví dụ:
+
+```json
+{
+  "sessionId": "923dcb05cc5a48c7adc04359202014d4",
+  "action": "KeyDown",
+  "key": "a",
+  "code": "KeyA",
+  "ctrlKey": false,
+  "shiftKey": false,
+  "altKey": false,
+  "sentAt": "2026-05-10T05:22:00Z"
+}
+```
+
+Server gửi tới Host:
+
+```text
+ReceiveKeyboardEvent
+```
+
+Server gửi lỗi về Viewer:
+
+```text
+SendKeyboardEventFailed
+```
+
+Điều kiện relay:
+
+```text
+Session phải có status = Accepted
+```
+
+---
+
+# 10. SignalR events server gửi về client
+
+## Connection events
+
+```text
+RegisterHostSuccess
+RegisterHostFailed
+RegisterViewerSuccess
+RegisterViewerFailed
+Pong
+```
+
+## Session events
+
+```text
+ReceiveControlRequest
+ControlRequestSent
+ControlRequestFailed
+ControlAccepted
+ControlRejected
+AcceptControlSuccess
+AcceptControlFailed
+RejectControlSuccess
+RejectControlFailed
+ControlEnded
+EndControlFailed
+```
+
+## Screen streaming events
+
+```text
+ReceiveScreenFrame
+SendScreenFrameFailed
+```
+
+## Input control events
+
+```text
+ReceiveMouseEvent
+SendMouseEventFailed
+ReceiveKeyboardEvent
+SendKeyboardEventFailed
+```
+
+---
+
+# 11. Luồng hoạt động tổng thể
+
+## Host online
+
+```text
+Host
+  |
+  | RegisterHost(hostId, computerName)
+  v
+RemoteHub
+  |
+  v
+ConnectionManager
+  |
+  | RegisterHostSuccess
+  v
+Host
+```
+
+## Viewer online
+
+```text
+Viewer
+  |
+  | RegisterViewer(viewerId, viewerName)
+  v
+RemoteHub
+  |
+  v
+ConnectionManager
+  |
+  | RegisterViewerSuccess
+  v
+Viewer
+```
+
+## Tạo session điều khiển
+
+```text
+Viewer
+  |
+  | RequestControl(hostId, viewerId, viewerName)
+  v
+RemoteHub
+  |
+  v
+SessionService
+  |
+  v
+SessionManager tạo Pending session
+  |
+  | ReceiveControlRequest
+  v
+Host
+```
+
+## Host Accept
+
+```text
+Host
+  |
+  | AcceptControl(sessionId)
+  v
+RemoteHub
+  |
+  v
+SessionManager đổi status = Accepted
+  |
+  | ControlAccepted
+  v
+Viewer
+```
+
+## Host gửi màn hình
+
+```text
+Host
+  |
+  | SendScreenFrame(sessionId, imageBase64, metadata)
+  v
+RemoteHub
+  |
+  | kiểm tra session Accepted
+  v
+Viewer
+  |
+  | ReceiveScreenFrame
+  v
+Hiển thị ảnh
+```
+
+## Viewer gửi chuột
+
+```text
+Viewer
+  |
+  | SendMouseEvent(sessionId, action, x, y)
+  v
+RemoteHub
+  |
+  | kiểm tra session Accepted
+  v
+Host
+  |
+  | ReceiveMouseEvent
+  v
+Log event hoặc thực thi về sau
+```
+
+## Viewer gửi bàn phím
+
+```text
+Viewer
+  |
+  | SendKeyboardEvent(sessionId, action, key, code)
+  v
+RemoteHub
+  |
+  | kiểm tra session Accepted
+  v
+Host
+  |
+  | ReceiveKeyboardEvent
+  v
+Log event hoặc thực thi về sau
+```
+
+---
+
+# 12. Cách chạy và test
+
+## Chạy server
 
 ```bash
 dotnet run
 ```
 
-Server local hiện tại thường chạy ở:
+Server local thường là:
 
 ```text
 http://localhost:5271
 ```
 
-SignalR endpoint:
-
-```text
-http://localhost:5271/remoteHub
-```
-
-HTML test page:
+HTML test:
 
 ```text
 http://localhost:5271/test-signalr.html
 ```
 
+REST API:
+
+```text
+http://localhost:5271/api/Connection/hosts
+http://localhost:5271/api/Connection/viewers
+http://localhost:5271/api/Session
+http://localhost:5271/api/Session/active
+```
+
 ---
 
-## 11.2. Test nhanh Phase 1
+## Test Phase 1
 
 Mở:
 
@@ -1592,36 +1481,34 @@ Thao tác:
 Connect SignalR
 Register Host
 Register Viewer
-Ping Host
-Ping Viewer
 ```
 
-Kiểm tra API:
+Kiểm tra:
 
 ```text
-http://localhost:5271/api/Connection/hosts
-http://localhost:5271/api/Connection/viewers
+/api/Connection/hosts
+/api/Connection/viewers
 ```
 
 ---
 
-## 11.3. Test nhanh Phase 2
+## Test Phase 2
 
 Mở 2 tab:
 
 ```text
-Tab 1: http://localhost:5271/test-signalr.html
-Tab 2: http://localhost:5271/test-signalr.html
+Tab 1: Host
+Tab 2: Viewer
 ```
 
-Tab 1 giả lập Host:
+Tab Host:
 
 ```text
 Connect SignalR
 Register Host
 ```
 
-Tab 2 giả lập Viewer:
+Tab Viewer:
 
 ```text
 Connect SignalR
@@ -1629,208 +1516,315 @@ Register Viewer
 Request Control
 ```
 
-Quay lại Tab 1:
+Tab Host:
 
 ```text
 Accept Control
 ```
 
-Quay lại Tab 2:
+Kiểm tra:
 
 ```text
-Kiểm tra ControlAccepted
+/api/Session
 ```
 
-Kiểm tra session:
+Session phải có:
 
 ```text
-http://localhost:5271/api/Session
-```
-
----
-
-# 12. Trạng thái session
-
-```text
-Pending   : Viewer đã gửi yêu cầu, Host chưa phản hồi
-Accepted  : Host đã chấp nhận điều khiển
-Rejected  : Host đã từ chối điều khiển
-Ended     : Phiên đã kết thúc
+status = Accepted
 ```
 
 ---
 
-# 13. Lưu ý hiện tại
+## Test Phase 3
 
-Hiện tại hệ thống mới là backend MVP.
+Sau khi session Accepted:
 
-Chưa có:
+Tab Host:
 
 ```text
-Authentication
-JWT
+Start Fake Streaming
+```
+
+Tab Viewer:
+
+```text
+Thấy Fake Host Screen
+Frame Count tăng
+Screen Size hiển thị
+Frame Size hiển thị
+Host Mouse hiển thị
+```
+
+---
+
+## Test Phase 4
+
+Sau khi Viewer thấy màn hình fake:
+
+Tab Viewer:
+
+```text
+Click vào ảnh remote screen
+Right click vào ảnh
+Double click vào ảnh
+Scroll trên ảnh
+Bấm Focus Remote Screen For Keyboard Test
+Nhấn phím bất kỳ
+```
+
+Tab Host phải thấy log:
+
+```text
+HOST received ReceiveMouseEvent
+HOST received ReceiveKeyboardEvent
+```
+
+Ví dụ Mouse Event:
+
+```json
+{
+  "sessionId": "923dcb05cc5a48c7adc04359202014d4",
+  "hostId": "HOST_001",
+  "viewerId": "VIEWER_001",
+  "action": "LeftClick",
+  "x": 960,
+  "y": 540,
+  "screenWidth": 1920,
+  "screenHeight": 1080,
+  "button": "Left",
+  "delta": 0
+}
+```
+
+---
+
+# 13. Lỗi thường gặp và cách xử lý
+
+## API không thấy Host/Viewer
+
+Nguyên nhân thường gặp:
+
+```text
+Chỉ bấm Connect SignalR nhưng chưa bấm Register Host / Register Viewer
+ConnectionManager không đăng ký Singleton
+Server restart làm mất dữ liệu RAM
+```
+
+Cách xử lý:
+
+```text
+Bấm Register Host / Register Viewer
+Kiểm tra Program.cs có AddSingleton<ConnectionManager>()
+Run server lại và test lại từ đầu
+```
+
+---
+
+## The maximum message size of 32768B was exceeded
+
+Nguyên nhân:
+
+```text
+Frame ảnh Base64 vượt giới hạn mặc định của SignalR
+```
+
+Cách xử lý trong Program.cs:
+
+```csharp
+builder.Services.AddSignalR(options =>
+{
+    options.MaximumReceiveMessageSize = 10 * 1024 * 1024;
+});
+```
+
+Đồng thời trong HTML dùng JPEG:
+
+```javascript
+canvas.toDataURL("image/jpeg", 0.6)
+```
+
+---
+
+## SendScreenFrameFailed - Session is not accepted or not found
+
+Nguyên nhân:
+
+```text
+Chưa Accept Control
+SessionId rỗng
+Server vừa restart
+Session đã Ended
+```
+
+Cách xử lý:
+
+```text
+Register Host lại
+Register Viewer lại
+Request Control lại
+Accept Control lại
+Start Fake Streaming lại
+```
+
+---
+
+## Click chuột không gửi event
+
+Kiểm tra:
+
+```text
+Viewer đã thấy ảnh Fake Host Screen chưa
+Session đang Accepted chưa
+Click đúng vào vùng ảnh remote screen chưa
+Tab Viewer có log "Click detected on remote screen" không
+Tab Viewer có log "SendMouseEvent sent" không
+```
+
+Nếu Viewer có log gửi nhưng Host không nhận, kiểm tra:
+
+```text
+RemoteHub.cs có SendMouseEvent chưa
+Server đang chạy bản code mới chưa
+Session status có Accepted không
+```
+
+---
+
+## Nhấn phím không gửi event
+
+Cách xử lý:
+
+```text
+Bấm Focus Remote Screen For Keyboard Test
+Sau đó mới nhấn phím
+```
+
+---
+
+# 14. Trạng thái hiện tại
+
+Hệ thống đã hoàn thành:
+
+```text
+Phase 1: Host / Viewer online
+Phase 2: Session control
+Phase 3: Screen streaming
+Phase 4: Mouse / keyboard relay
+```
+
+Chưa thực hiện:
+
+```text
+WinForms Host thật
+WinForms Viewer thật
+Chụp màn hình thật từ Host
+Thực thi chuột/phím thật trên Host
 Firebase
-Database
-Screen streaming
-Mouse control
-Keyboard control
-File transfer
-Load balancer
-Redis
-HTTPS production
-```
-
-Dữ liệu đang lưu trong RAM, nên khi restart server:
-
-```text
-Danh sách Host online mất
-Danh sách Viewer online mất
-Danh sách Session mất
+Authentication
+Authorization
+Permission nâng cao
+Session history persistent
+Activity logs persistent
 ```
 
 ---
 
-# 14. Phase tiếp theo
+# 15. Phase tiếp theo đề xuất
 
-## Phase 3 - Screen Streaming
+## Phase 5 — Tạo WinForms Host App
 
 Mục tiêu:
 
 ```text
-Host chụp màn hình
-Host gửi frame màn hình lên Server
-Server kiểm tra session Accepted
-Server relay frame đến đúng Viewer
-Viewer hiển thị màn hình Host
+Host WinForms kết nối SignalR
+Host đăng ký HostId
+Host nhận ReceiveControlRequest
+Host có nút Accept / Reject
+Host chụp màn hình thật
+Host gửi SendScreenFrame thật
+Host nhận ReceiveMouseEvent
+Host nhận ReceiveKeyboardEvent
 ```
 
-Server sẽ cần thêm:
+Ở giai đoạn đầu, Host WinForms có thể chỉ log mouse/keyboard event.
 
-```text
-DTOs/ScreenFrameDto.cs
-RemoteHub.SendScreenFrame()
-```
-
-Luồng dự kiến:
-
-```text
-Host
-   |
-   | SendScreenFrame(sessionId, imageBase64)
-   v
-Server
-   |
-   | kiểm tra session Accepted
-   v
-Viewer
-   |
-   | ReceiveScreenFrame
-   v
-Hiển thị ảnh
-```
-
-Lưu ý:
-
-```text
-Không lưu frame màn hình vào database
-Không lưu frame màn hình vào Firebase
-Chỉ relay realtime qua SignalR
-```
+Sau đó mới thực thi thật bằng Windows API.
 
 ---
 
-## Phase 4 - Mouse / Keyboard Control
+## Phase 6 — Tạo WinForms Viewer App
 
 Mục tiêu:
 
 ```text
-Viewer gửi sự kiện chuột/phím
-Server kiểm tra session Accepted
-Server relay event đến Host
-Host thực thi input bằng Windows API
-```
-
-Server sẽ cần thêm:
-
-```text
-MouseEventDto.cs
-KeyboardEventDto.cs
-SendMouseEvent()
-SendKeyboardEvent()
+Viewer WinForms kết nối SignalR
+Viewer đăng ký ViewerId
+Viewer lấy danh sách Host online qua API
+Viewer gửi RequestControl
+Viewer nhận ReceiveScreenFrame
+Viewer hiển thị màn hình bằng PictureBox
+Viewer bắt chuột/phím và gửi SendMouseEvent / SendKeyboardEvent
 ```
 
 ---
 
-# 15. Ghi chú thiết kế
+## Phase 7 — Host thực thi input thật
 
-## Vì sao dùng SignalR?
-
-Vì hệ thống cần giao tiếp realtime:
+Mục tiêu:
 
 ```text
-Host online/offline
-Viewer request control
-Host accept/reject
-Screen frame
-Mouse event
-Keyboard event
+Host dùng Windows API để di chuyển chuột
+Host click chuột
+Host scroll
+Host gõ phím
 ```
 
-SignalR phù hợp hơn REST API cho các dữ liệu realtime.
-
----
-
-## Vì sao chưa dùng database?
-
-Ở giai đoạn MVP, mục tiêu chính là chứng minh luồng realtime hoạt động.
-
-Database nên thêm sau khi đã hoàn thành:
+Các API Windows có thể dùng:
 
 ```text
-Connection
-Session
-Screen streaming
-Input control
+SetCursorPos
+SendInput
+mouse_event
+keybd_event
 ```
 
-Sau này Firebase có thể dùng để lưu:
+Khuyến nghị dùng:
 
 ```text
-User
-Host list
-Permission
-Session history
-Activity log
-```
-
-Nhưng không nên dùng Firebase để lưu:
-
-```text
-Screen frame realtime
-Mouse event realtime
-Keyboard event realtime
+SendInput
 ```
 
 ---
 
-## Vì sao dùng test-signalr.html?
+## Phase 8 — Firebase + Auth
 
-Vì chưa có app WinForms Host/Viewer thật.
-
-File HTML giúp test nhanh:
+Mục tiêu:
 
 ```text
-SignalR connection
-Register Host
-Register Viewer
-Request Control
-Accept/Reject
-End Control
+Lưu user
+Lưu host list
+Lưu permission
+Lưu session history
+Lưu activity logs
+Thêm JWT authentication
+Kiểm tra quyền Viewer có được điều khiển Host không
 ```
 
-Sau này khi làm WinForms, cơ chế sẽ giống HTML test, chỉ khác client library:
+Firebase nên lưu:
 
 ```text
-HTML dùng signalR JavaScript client
-WinForms dùng Microsoft.AspNetCore.SignalR.Client
+users
+hosts
+sessions
+permissions
+activity_logs
+```
+
+Không nên lưu:
+
+```text
+screen frame realtime
+mouse realtime
+keyboard realtime
 ```

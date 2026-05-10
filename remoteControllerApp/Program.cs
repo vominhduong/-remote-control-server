@@ -6,7 +6,10 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
 
-builder.Services.AddSignalR();
+builder.Services.AddSignalR(options =>
+{
+    options.MaximumReceiveMessageSize = 10 * 1024 * 1024; // 10MB
+});
 
 builder.Services.AddSingleton<ConnectionManager>();
 builder.Services.AddSingleton<SessionManager>();
@@ -23,7 +26,6 @@ if (app.Environment.IsDevelopment())
     app.MapOpenApi();
 }
 
-// Tạm tắt khi dev local
 // app.UseHttpsRedirection();
 
 app.UseAuthorization();

@@ -24,7 +24,6 @@ public class RemoteHub : Hub
     public override async Task OnConnectedAsync()
     {
         Console.WriteLine($"Client connected: {Context.ConnectionId}");
-
         await base.OnConnectedAsync();
     }
 
@@ -88,14 +87,12 @@ public class RemoteHub : Hub
     public async Task PingHost(string hostId)
     {
         _connectionManager.UpdateHostLastSeen(hostId);
-
         await Clients.Caller.SendAsync("Pong", DateTime.UtcNow);
     }
 
     public async Task PingViewer(string viewerId)
     {
         _connectionManager.UpdateViewerLastSeen(viewerId);
-
         await Clients.Caller.SendAsync("Pong", DateTime.UtcNow);
     }
 
@@ -105,7 +102,9 @@ public class RemoteHub : Hub
         {
             var session = _sessionService.CreateControlRequest(request);
 
-            Console.WriteLine($"Control request created. SessionId: {session.SessionId}, Viewer: {session.ViewerId}, Host: {session.HostId}");
+            Console.WriteLine(
+                $"Control request created. SessionId: {session.SessionId}, Viewer: {session.ViewerId}, Host: {session.HostId}"
+            );
 
             await Clients.Client(session.HostConnectionId).SendAsync("ReceiveControlRequest", new
             {
@@ -232,6 +231,130 @@ public class RemoteHub : Hub
             session.ViewerId,
             Status = "Ended",
             EndedAt = DateTime.UtcNow
+        });
+    }
+
+    public async Task SendScreenFrame(ScreenFrameDto request)
+    {
+        if (string.IsNullOrWhiteSpace(request.SessionId))
+        {
+            await Clients.Caller.SendAsync("SendScreenFrameFailed", "SessionId is required.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(request.ImageBase64))
+        {
+            await Clients.Caller.SendAsync("SendScreenFrameFailed", "ImageBase64 is required.");
+            return;
+        }
+
+        var session = _sessionManager.GetAcceptedSession(request.SessionId);
+
+        if (session == null)
+        {
+            await Clients.Caller.SendAsync("SendScreenFrameFailed", "Session is not accepted or not found.");
+            return;
+        }
+
+        await Clients.Client(session.ViewerConnectionId).SendAsync("ReceiveScreenFrame", new
+        {
+            session.SessionId,
+            session.HostId,
+            session.ViewerId,
+
+            request.ImageBase64,
+
+            request.ScreenWidth,
+            request.ScreenHeight,
+            request.FrameWidth,
+            request.FrameHeight,
+
+            request.MouseX,
+            request.MouseY,
+
+            request.SentAt,
+            ReceivedAt = DateTime.UtcNow
+        });
+    }
+
+    public async Task SendMouseEvent(MouseEventDto request)
+    {
+        if (string.IsNullOrWhiteSpace(request.SessionId))
+        {
+            await Clients.Caller.SendAsync("SendMouseEventFailed", "SessionId is required.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Action))
+        {
+            await Clients.Caller.SendAsync("SendMouseEventFailed", "Mouse action is required.");
+            return;
+        }
+
+        var session = _sessionManager.GetAcceptedSession(request.SessionId);
+
+        if (session == null)
+        {
+            await Clients.Caller.SendAsync("SendMouseEventFailed", "Session is not accepted or not found.");
+            return;
+        }
+
+        await Clients.Client(session.HostConnectionId).SendAsync("ReceiveMouseEvent", new
+        {
+            session.SessionId,
+            session.HostId,
+            session.ViewerId,
+
+            request.Action,
+            request.X,
+            request.Y,
+            request.ScreenWidth,
+            request.ScreenHeight,
+            request.Button,
+            request.Delta,
+
+            request.SentAt,
+            ReceivedAt = DateTime.UtcNow
+        });
+    }
+
+    public async Task SendKeyboardEvent(KeyboardEventDto request)
+    {
+        if (string.IsNullOrWhiteSpace(request.SessionId))
+        {
+            await Clients.Caller.SendAsync("SendKeyboardEventFailed", "SessionId is required.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Action))
+        {
+            await Clients.Caller.SendAsync("SendKeyboardEventFailed", "Keyboard action is required.");
+            return;
+        }
+
+        var session = _sessionManager.GetAcceptedSession(request.SessionId);
+
+        if (session == null)
+        {
+            await Clients.Caller.SendAsync("SendKeyboardEventFailed", "Session is not accepted or not found.");
+            return;
+        }
+
+        await Clients.Client(session.HostConnectionId).SendAsync("ReceiveKeyboardEvent", new
+        {
+            session.SessionId,
+            session.HostId,
+            session.ViewerId,
+
+            request.Action,
+            request.Key,
+            request.Code,
+            request.CtrlKey,
+            request.ShiftKey,
+            request.AltKey,
+
+            request.SentAt,
+            ReceivedAt = DateTime.UtcNow
         });
     }
 }

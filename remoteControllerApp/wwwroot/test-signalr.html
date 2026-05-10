@@ -3,6 +3,7 @@
 <head>
     <meta charset="utf-8" />
     <title>SignalR Remote Control Test</title>
+
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -18,13 +19,14 @@
         input {
             padding: 8px;
             margin: 5px;
-            width: 240px;
+            width: 260px;
         }
 
         .box {
             border: 1px solid #ccc;
             padding: 12px;
             margin-bottom: 14px;
+            border-radius: 8px;
         }
 
         #log {
@@ -32,13 +34,59 @@
             padding: 12px;
             background: #111;
             color: #00ff88;
-            height: 380px;
+            height: 420px;
             overflow-y: auto;
             white-space: pre-wrap;
             font-family: Consolas, monospace;
         }
+
+        #remoteScreenWrapper {
+            position: relative;
+            display: inline-block;
+            margin-top: 10px;
+            border: 1px solid #333;
+            background: #000;
+            outline: none;
+            cursor: crosshair;
+        }
+
+            #remoteScreenWrapper:focus {
+                border: 2px solid #2563eb;
+            }
+
+        #remoteScreen {
+            display: block;
+            max-width: 900px;
+            user-select: none;
+            cursor: crosshair;
+        }
+
+        #mousePointer {
+            position: absolute;
+            width: 14px;
+            height: 14px;
+            background: red;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            pointer-events: none;
+            display: none;
+        }
+
+        .meta {
+            margin-top: 8px;
+            font-family: Consolas, monospace;
+            background: #f4f4f4;
+            padding: 10px;
+            border-radius: 6px;
+        }
+
+        .hint {
+            color: #555;
+            font-size: 14px;
+        }
     </style>
 </head>
+
 <body>
     <h2>Remote Control SignalR Test</h2>
 
@@ -50,26 +98,69 @@
 
     <div class="box">
         <h3>Host Test</h3>
+
         <input id="hostId" value="HOST_001" placeholder="Host ID" />
         <input id="computerName" value="Test Computer" placeholder="Computer Name" />
+
         <button onclick="registerHost()">Register Host</button>
         <button onclick="pingHost()">Ping Host</button>
+
         <br />
+
         <input id="hostSessionId" placeholder="Session ID received by Host" />
+
         <button onclick="acceptControl()">Accept Control</button>
         <button onclick="rejectControl()">Reject Control</button>
+
+        <br />
+
+        <button onclick="sendOneScreenFrame()">Send One Screen Frame</button>
+        <button onclick="startScreenStreaming()">Start Fake Streaming</button>
+        <button onclick="stopScreenStreaming()">Stop Fake Streaming</button>
     </div>
 
     <div class="box">
         <h3>Viewer Test</h3>
+
         <input id="viewerId" value="VIEWER_001" placeholder="Viewer ID" />
         <input id="viewerName" value="Test Viewer" placeholder="Viewer Name" />
+
         <button onclick="registerViewer()">Register Viewer</button>
         <button onclick="pingViewer()">Ping Viewer</button>
         <button onclick="requestControl()">Request Control</button>
+
         <br />
+
         <input id="viewerSessionId" placeholder="Session ID created by Viewer" />
         <button onclick="endControl()">End Control</button>
+
+        <br />
+
+        <button onclick="focusRemoteScreen()">Focus Remote Screen For Keyboard Test</button>
+        <button onclick="sendTestKeyboardEvent()">Send Test Key A</button>
+        <button onclick="sendTestMouseClick()">Send Test Mouse Click Center</button>
+    </div>
+
+    <div class="box">
+        <h3>Remote Screen Preview</h3>
+
+        <p class="hint">
+            Viewer test: click / right click / double click / scroll vào ảnh để gửi mouse event.
+            Click vào vùng ảnh rồi nhấn phím để gửi keyboard event.
+        </p>
+
+        <div class="meta">
+            Frame Count: <span id="frameCount">0</span><br />
+            Screen Size: <span id="screenSize">N/A</span><br />
+            Frame Size: <span id="frameSize">N/A</span><br />
+            Host Mouse: <span id="mousePosition">N/A</span><br />
+            Last Received: <span id="lastReceived">N/A</span>
+        </div>
+
+        <div id="remoteScreenWrapper" tabindex="0">
+            <img id="remoteScreen" draggable="false" />
+            <div id="mousePointer"></div>
+        </div>
     </div>
 
     <div class="box">
@@ -86,6 +177,20 @@
 
     <script>
         let connection = null;
+
+        let streamingTimer = null;
+        let frameCounter = 0;
+        let receivedFrameCount = 0;
+
+        let lastRemoteScreenWidth = 1920;
+        let lastRemoteScreenHeight = 1080;
+
+        let lastMouseMoveAt = 0;
+
+        const fakeScreenWidth = 1920;
+        const fakeScreenHeight = 1080;
+        const fakeFrameWidth = 960;
+        const fakeFrameHeight = 540;
 
         function log(message) {
             const logBox = document.getElementById("log");
@@ -186,6 +291,50 @@
                 log("EndControlFailed: " + message);
             });
 
+            connection.on("ReceiveScreenFrame", function (data) {
+                receivedFrameCount++;
+
+                lastRemoteScreenWidth = data.screenWidth;
+                lastRemoteScreenHeight = data.screenHeight;
+
+                document.getElementById("frameCount").textContent = receivedFrameCount;
+                document.getElementById("screenSize").textContent = data.screenWidth + " x " + data.screenHeight;
+                document.getElementById("frameSize").textContent = data.frameWidth + " x " + data.frameHeight;
+                document.getElementById("mousePosition").textContent = "X=" + data.mouseX + ", Y=" + data.mouseY;
+                document.getElementById("lastReceived").textContent = new Date().toLocaleTimeString();
+
+                const img = document.getElementById("remoteScreen");
+                img.src = "data:image/jpeg;base64," + data.imageBase64;
+
+                img.onload = function () {
+                    updateMousePointer(data);
+                };
+
+                log("ReceiveScreenFrame: sessionId=" + data.sessionId + ", mouse=(" + data.mouseX + "," + data.mouseY + ")");
+            });
+
+            connection.on("SendScreenFrameFailed", function (message) {
+                log("SendScreenFrameFailed: " + message);
+            });
+
+            connection.on("ReceiveMouseEvent", function (data) {
+                log("HOST received ReceiveMouseEvent:");
+                log(JSON.stringify(data, null, 2));
+            });
+
+            connection.on("SendMouseEventFailed", function (message) {
+                log("SendMouseEventFailed: " + message);
+            });
+
+            connection.on("ReceiveKeyboardEvent", function (data) {
+                log("HOST received ReceiveKeyboardEvent:");
+                log(JSON.stringify(data, null, 2));
+            });
+
+            connection.on("SendKeyboardEventFailed", function (message) {
+                log("SendKeyboardEventFailed: " + message);
+            });
+
             connection.onreconnecting(function () {
                 log("Reconnecting...");
             });
@@ -204,6 +353,8 @@
                 log("Connection is null.");
                 return;
             }
+
+            stopScreenStreaming();
 
             await connection.stop();
             log("Disconnected.");
@@ -318,10 +469,408 @@
                 return;
             }
 
-            const sessionId = document.getElementById("viewerSessionId").value;
+            const viewerSessionId = document.getElementById("viewerSessionId").value;
+            const hostSessionId = document.getElementById("hostSessionId").value;
+            const sessionId = viewerSessionId || hostSessionId;
+
+            if (!sessionId) {
+                log("SessionId is empty. Cannot end control.");
+                return;
+            }
 
             await connection.invoke("EndControl", sessionId);
             log("EndControl sent: " + sessionId);
+        }
+
+        function getCurrentSessionId() {
+            const hostSessionId = document.getElementById("hostSessionId").value;
+            const viewerSessionId = document.getElementById("viewerSessionId").value;
+
+            return hostSessionId || viewerSessionId;
+        }
+
+        function createFakeScreenFrame() {
+            frameCounter++;
+
+            const canvas = document.createElement("canvas");
+            canvas.width = fakeFrameWidth;
+            canvas.height = fakeFrameHeight;
+
+            const ctx = canvas.getContext("2d");
+
+            ctx.fillStyle = "#111827";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            ctx.fillStyle = "#22c55e";
+            ctx.font = "36px Arial";
+            ctx.fillText("Fake Host Screen", 40, 70);
+
+            ctx.fillStyle = "#ffffff";
+            ctx.font = "24px Arial";
+            ctx.fillText("Frame: " + frameCounter, 40, 120);
+            ctx.fillText("Time: " + new Date().toLocaleTimeString(), 40, 160);
+
+            ctx.fillStyle = "#3b82f6";
+            const boxX = 40 + (frameCounter * 20) % 760;
+            const boxY = 250;
+            ctx.fillRect(boxX, boxY, 120, 90);
+
+            ctx.fillStyle = "#facc15";
+            ctx.font = "20px Arial";
+            ctx.fillText("Screen: " + fakeScreenWidth + "x" + fakeScreenHeight, 40, 210);
+
+            const mouseX = Math.floor(fakeScreenWidth / 2);
+            const mouseY = Math.floor(fakeScreenHeight / 2);
+
+            const frameMouseX = Math.floor(mouseX * fakeFrameWidth / fakeScreenWidth);
+            const frameMouseY = Math.floor(mouseY * fakeFrameHeight / fakeScreenHeight);
+
+            ctx.fillStyle = "#ef4444";
+            ctx.beginPath();
+            ctx.arc(frameMouseX, frameMouseY, 8, 0, 2 * Math.PI);
+            ctx.fill();
+
+            const dataUrl = canvas.toDataURL("image/jpeg", 0.6);
+
+            return {
+                imageBase64: dataUrl.replace("data:image/jpeg;base64,", ""),
+                screenWidth: fakeScreenWidth,
+                screenHeight: fakeScreenHeight,
+                frameWidth: fakeFrameWidth,
+                frameHeight: fakeFrameHeight,
+                mouseX: mouseX,
+                mouseY: mouseY
+            };
+        }
+
+        async function sendOneScreenFrame() {
+            if (!connection) {
+                log("Please connect first.");
+                return;
+            }
+
+            const sessionId = getCurrentSessionId();
+
+            if (!sessionId) {
+                log("SessionId is empty. Cannot send screen frame.");
+                return;
+            }
+
+            const fakeFrame = createFakeScreenFrame();
+
+            const request = {
+                sessionId: sessionId,
+                imageBase64: fakeFrame.imageBase64,
+
+                screenWidth: fakeFrame.screenWidth,
+                screenHeight: fakeFrame.screenHeight,
+
+                frameWidth: fakeFrame.frameWidth,
+                frameHeight: fakeFrame.frameHeight,
+
+                mouseX: fakeFrame.mouseX,
+                mouseY: fakeFrame.mouseY,
+
+                sentAt: new Date().toISOString()
+            };
+
+            await connection.invoke("SendScreenFrame", request);
+
+            log("SendScreenFrame sent: " + sessionId);
+        }
+
+        function startScreenStreaming() {
+            if (streamingTimer) {
+                log("Streaming already started.");
+                return;
+            }
+
+            streamingTimer = setInterval(async function () {
+                try {
+                    await sendOneScreenFrame();
+                } catch (err) {
+                    log("Streaming error: " + err);
+                }
+            }, 1000);
+
+            log("Fake screen streaming started.");
+        }
+
+        function stopScreenStreaming() {
+            if (streamingTimer) {
+                clearInterval(streamingTimer);
+                streamingTimer = null;
+                log("Fake screen streaming stopped.");
+            }
+        }
+
+        function updateMousePointer(data) {
+            const img = document.getElementById("remoteScreen");
+            const pointer = document.getElementById("mousePointer");
+
+            if (!img.clientWidth || !img.clientHeight) {
+                return;
+            }
+
+            const scaleX = img.clientWidth / data.screenWidth;
+            const scaleY = img.clientHeight / data.screenHeight;
+
+            const displayX = data.mouseX * scaleX;
+            const displayY = data.mouseY * scaleY;
+
+            pointer.style.left = displayX + "px";
+            pointer.style.top = displayY + "px";
+            pointer.style.display = "block";
+        }
+
+        function getHostCoordinateFromEvent(event) {
+            const img = document.getElementById("remoteScreen");
+
+            if (!img || img.clientWidth === 0 || img.clientHeight === 0) {
+                log("Remote screen image is not loaded yet. Start Fake Streaming first.");
+                return null;
+            }
+
+            const rect = img.getBoundingClientRect();
+
+            const displayX = event.clientX - rect.left;
+            const displayY = event.clientY - rect.top;
+
+            if (
+                displayX < 0 ||
+                displayY < 0 ||
+                displayX > img.clientWidth ||
+                displayY > img.clientHeight
+            ) {
+                log("Mouse is outside image area.");
+                return null;
+            }
+
+            const hostX = Math.round(displayX * lastRemoteScreenWidth / img.clientWidth);
+            const hostY = Math.round(displayY * lastRemoteScreenHeight / img.clientHeight);
+
+            return {
+                x: Math.max(0, Math.min(hostX, lastRemoteScreenWidth)),
+                y: Math.max(0, Math.min(hostY, lastRemoteScreenHeight))
+            };
+        }
+
+        async function sendMouseEvent(action, x, y, button = "", delta = 0) {
+            if (!connection) {
+                log("Please connect first.");
+                return;
+            }
+
+            const sessionId = getCurrentSessionId();
+
+            if (!sessionId) {
+                log("SessionId is empty. Cannot send mouse event.");
+                return;
+            }
+
+            const request = {
+                sessionId: sessionId,
+                action: action,
+                x: x,
+                y: y,
+                screenWidth: lastRemoteScreenWidth,
+                screenHeight: lastRemoteScreenHeight,
+                button: button,
+                delta: delta,
+                sentAt: new Date().toISOString()
+            };
+
+            await connection.invoke("SendMouseEvent", request);
+
+            log("SendMouseEvent sent: " + action + " x=" + x + " y=" + y);
+        }
+
+        async function sendKeyboardEvent(action, event) {
+            if (!connection) {
+                log("Please connect first.");
+                return;
+            }
+
+            const sessionId = getCurrentSessionId();
+
+            if (!sessionId) {
+                log("SessionId is empty. Cannot send keyboard event.");
+                return;
+            }
+
+            const request = {
+                sessionId: sessionId,
+                action: action,
+                key: event.key,
+                code: event.code,
+                ctrlKey: event.ctrlKey,
+                shiftKey: event.shiftKey,
+                altKey: event.altKey,
+                sentAt: new Date().toISOString()
+            };
+
+            await connection.invoke("SendKeyboardEvent", request);
+
+            log("SendKeyboardEvent sent: " + action + " key=" + event.key + " code=" + event.code);
+        }
+
+        function bindRemoteScreenInputEvents() {
+            const wrapper = document.getElementById("remoteScreenWrapper");
+
+            if (!wrapper) {
+                console.error("remoteScreenWrapper not found.");
+                return;
+            }
+
+            wrapper.addEventListener("mousedown", async function (event) {
+                event.preventDefault();
+                wrapper.focus();
+
+                log("MouseDown detected on remote screen.");
+
+                const pos = getHostCoordinateFromEvent(event);
+                if (!pos) return;
+
+                let button = "Left";
+
+                if (event.button === 1) {
+                    button = "Middle";
+                }
+
+                if (event.button === 2) {
+                    button = "Right";
+                }
+
+                await sendMouseEvent("MouseDown", pos.x, pos.y, button, 0);
+            });
+
+            wrapper.addEventListener("mouseup", async function (event) {
+                event.preventDefault();
+                wrapper.focus();
+
+                log("MouseUp detected on remote screen.");
+
+                const pos = getHostCoordinateFromEvent(event);
+                if (!pos) return;
+
+                let button = "Left";
+
+                if (event.button === 1) {
+                    button = "Middle";
+                }
+
+                if (event.button === 2) {
+                    button = "Right";
+                }
+
+                await sendMouseEvent("MouseUp", pos.x, pos.y, button, 0);
+            });
+
+            wrapper.addEventListener("click", async function (event) {
+                event.preventDefault();
+                wrapper.focus();
+
+                log("Click detected on remote screen.");
+
+                const pos = getHostCoordinateFromEvent(event);
+                if (!pos) return;
+
+                await sendMouseEvent("LeftClick", pos.x, pos.y, "Left", 0);
+            });
+
+            wrapper.addEventListener("contextmenu", async function (event) {
+                event.preventDefault();
+                wrapper.focus();
+
+                log("Right click detected on remote screen.");
+
+                const pos = getHostCoordinateFromEvent(event);
+                if (!pos) return;
+
+                await sendMouseEvent("RightClick", pos.x, pos.y, "Right", 0);
+            });
+
+            wrapper.addEventListener("dblclick", async function (event) {
+                event.preventDefault();
+                wrapper.focus();
+
+                log("Double click detected on remote screen.");
+
+                const pos = getHostCoordinateFromEvent(event);
+                if (!pos) return;
+
+                await sendMouseEvent("DoubleClick", pos.x, pos.y, "Left", 0);
+            });
+
+            wrapper.addEventListener("mousemove", async function (event) {
+                const now = Date.now();
+
+                if (now - lastMouseMoveAt < 300) {
+                    return;
+                }
+
+                lastMouseMoveAt = now;
+
+                const pos = getHostCoordinateFromEvent(event);
+                if (!pos) return;
+
+                await sendMouseEvent("MouseMove", pos.x, pos.y, "", 0);
+            });
+
+            wrapper.addEventListener("wheel", async function (event) {
+                event.preventDefault();
+                wrapper.focus();
+
+                log("Wheel detected on remote screen.");
+
+                const pos = getHostCoordinateFromEvent(event);
+                if (!pos) return;
+
+                const delta = event.deltaY < 0 ? 120 : -120;
+
+                await sendMouseEvent("Scroll", pos.x, pos.y, "Wheel", delta);
+            }, { passive: false });
+
+            wrapper.addEventListener("keydown", async function (event) {
+                event.preventDefault();
+                await sendKeyboardEvent("KeyDown", event);
+            });
+
+            wrapper.addEventListener("keyup", async function (event) {
+                event.preventDefault();
+                await sendKeyboardEvent("KeyUp", event);
+            });
+
+            log("Remote screen mouse/keyboard events bound.");
+        }
+
+        function focusRemoteScreen() {
+            const wrapper = document.getElementById("remoteScreenWrapper");
+            wrapper.focus();
+            log("Remote screen focused. Now press keys to send keyboard events.");
+        }
+
+        async function sendTestMouseClick() {
+            await sendMouseEvent(
+                "LeftClick",
+                Math.round(lastRemoteScreenWidth / 2),
+                Math.round(lastRemoteScreenHeight / 2),
+                "Left",
+                0
+            );
+        }
+
+        async function sendTestKeyboardEvent() {
+            const fakeEvent = {
+                key: "a",
+                code: "KeyA",
+                ctrlKey: false,
+                shiftKey: false,
+                altKey: false
+            };
+
+            await sendKeyboardEvent("KeyDown", fakeEvent);
+            await sendKeyboardEvent("KeyUp", fakeEvent);
         }
 
         function openHosts() {
@@ -339,6 +888,8 @@
         function openActiveSessions() {
             window.open("/api/Session/active", "_blank");
         }
+
+        bindRemoteScreenInputEvents();
     </script>
 </body>
 </html>
