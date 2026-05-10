@@ -115,7 +115,7 @@ public class SessionManager
         return true;
     }
 
-    public void EndSessionsByConnectionId(string connectionId)
+    public List<RemoteSession> EndSessionsByConnectionId(string connectionId)
     {
         var relatedSessions = _sessions.Values
             .Where(x =>
@@ -128,5 +128,7 @@ public class SessionManager
             session.Status = "Ended";
             session.EndedAt = DateTime.UtcNow;
         }
+
+        return relatedSessions;
     }
 }

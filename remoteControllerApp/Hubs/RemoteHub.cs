@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.SignalR;
 using remoteControllerApp.DTOs;
 using remoteControllerApp.Manager;
+using remoteControllerApp.Repositories;
 using remoteControllerApp.Services;
 
 namespace remoteControllerApp.Hubs;
@@ -10,27 +11,69 @@ public class RemoteHub : Hub
     private readonly ConnectionManager _connectionManager;
     private readonly SessionManager _sessionManager;
     private readonly SessionService _sessionService;
+    private readonly IRealtimeDatabaseRepository _realtimeDatabase;
 
     public RemoteHub(
         ConnectionManager connectionManager,
         SessionManager sessionManager,
-        SessionService sessionService)
+        SessionService sessionService,
+        IRealtimeDatabaseRepository realtimeDatabase)
     {
         _connectionManager = connectionManager;
         _sessionManager = sessionManager;
         _sessionService = sessionService;
+        _realtimeDatabase = realtimeDatabase;
     }
 
     public override async Task OnConnectedAsync()
     {
         Console.WriteLine($"Client connected: {Context.ConnectionId}");
+
         await base.OnConnectedAsync();
     }
 
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
+        var now = DateTime.UtcNow;
+
+        var host = _connectionManager.GetHostByConnectionId(Context.ConnectionId);
+        var viewer = _connectionManager.GetViewerByConnectionId(Context.ConnectionId);
+
+        var endedSessions = _sessionManager.EndSessionsByConnectionId(Context.ConnectionId);
+
         _connectionManager.MarkDisconnected(Context.ConnectionId);
-        _sessionManager.EndSessionsByConnectionId(Context.ConnectionId);
+
+        if (host != null)
+        {
+            await _realtimeDatabase.PatchAsync($"hosts/{host.HostId}", new
+            {
+                isOnline = false,
+                disconnectedAt = now,
+                lastSeenAt = now,
+                connectionId = ""
+            });
+        }
+
+        if (viewer != null)
+        {
+            await _realtimeDatabase.PatchAsync($"viewers/{viewer.ViewerId}", new
+            {
+                isOnline = false,
+                disconnectedAt = now,
+                lastSeenAt = now,
+                connectionId = ""
+            });
+        }
+
+        foreach (var session in endedSessions)
+        {
+            await _realtimeDatabase.PatchAsync($"sessions/{session.SessionId}", new
+            {
+                status = "Ended",
+                endedAt = session.EndedAt ?? now,
+                endReason = "Client disconnected"
+            });
+        }
 
         Console.WriteLine($"Client disconnected: {Context.ConnectionId}");
 
@@ -46,15 +89,42 @@ public class RemoteHub : Hub
     {
         if (string.IsNullOrWhiteSpace(request.HostId))
         {
-            await Clients.Caller.SendAsync("RegisterHostFailed", "HostId is required");
+            await Clients.Caller.SendAsync("RegisterHostFailed", "HostId is required.");
             return;
         }
+
+        if (string.IsNullOrWhiteSpace(request.UserId))
+        {
+            await Clients.Caller.SendAsync("RegisterHostFailed", "UserId is required.");
+            return;
+        }
+
+        var now = DateTime.UtcNow;
 
         _connectionManager.AddOrUpdateHost(
             request.HostId,
             Context.ConnectionId,
             request.ComputerName
         );
+
+        await _realtimeDatabase.SetAsync($"hosts/{request.HostId}", new
+        {
+            hostId = request.HostId,
+            computerName = request.ComputerName,
+            ownerUserId = request.UserId,
+            connectionId = Context.ConnectionId,
+            isOnline = true,
+            connectedAt = now,
+            lastSeenAt = now
+        });
+
+        await _realtimeDatabase.SetAsync($"user_hosts/{request.UserId}/{request.HostId}", new
+        {
+            hostId = request.HostId,
+            computerName = request.ComputerName,
+            isOnline = true,
+            lastSeenAt = now
+        });
 
         await Groups.AddToGroupAsync(Context.ConnectionId, $"HOST_{request.HostId}");
 
@@ -67,15 +137,42 @@ public class RemoteHub : Hub
     {
         if (string.IsNullOrWhiteSpace(request.ViewerId))
         {
-            await Clients.Caller.SendAsync("RegisterViewerFailed", "ViewerId is required");
+            await Clients.Caller.SendAsync("RegisterViewerFailed", "ViewerId is required.");
             return;
         }
+
+        if (string.IsNullOrWhiteSpace(request.UserId))
+        {
+            await Clients.Caller.SendAsync("RegisterViewerFailed", "UserId is required.");
+            return;
+        }
+
+        var now = DateTime.UtcNow;
 
         _connectionManager.AddOrUpdateViewer(
             request.ViewerId,
             Context.ConnectionId,
             request.ViewerName
         );
+
+        await _realtimeDatabase.SetAsync($"viewers/{request.ViewerId}", new
+        {
+            viewerId = request.ViewerId,
+            viewerName = request.ViewerName,
+            userId = request.UserId,
+            connectionId = Context.ConnectionId,
+            isOnline = true,
+            connectedAt = now,
+            lastSeenAt = now
+        });
+
+        await _realtimeDatabase.SetAsync($"user_viewers/{request.UserId}/{request.ViewerId}", new
+        {
+            viewerId = request.ViewerId,
+            viewerName = request.ViewerName,
+            isOnline = true,
+            lastSeenAt = now
+        });
 
         await Groups.AddToGroupAsync(Context.ConnectionId, $"VIEWER_{request.ViewerId}");
 
@@ -86,21 +183,70 @@ public class RemoteHub : Hub
 
     public async Task PingHost(string hostId)
     {
+        var now = DateTime.UtcNow;
+
         _connectionManager.UpdateHostLastSeen(hostId);
-        await Clients.Caller.SendAsync("Pong", DateTime.UtcNow);
+
+        await _realtimeDatabase.PatchAsync($"hosts/{hostId}", new
+        {
+            lastSeenAt = now,
+            isOnline = true
+        });
+
+        await Clients.Caller.SendAsync("Pong", now);
     }
 
     public async Task PingViewer(string viewerId)
     {
+        var now = DateTime.UtcNow;
+
         _connectionManager.UpdateViewerLastSeen(viewerId);
-        await Clients.Caller.SendAsync("Pong", DateTime.UtcNow);
+
+        await _realtimeDatabase.PatchAsync($"viewers/{viewerId}", new
+        {
+            lastSeenAt = now,
+            isOnline = true
+        });
+
+        await Clients.Caller.SendAsync("Pong", now);
     }
 
     public async Task RequestControl(ControlRequestDto request)
     {
         try
         {
+            if (string.IsNullOrWhiteSpace(request.UserId))
+            {
+                await Clients.Caller.SendAsync("ControlRequestFailed", "UserId is required.");
+                return;
+            }
+
             var session = _sessionService.CreateControlRequest(request);
+
+            await _realtimeDatabase.SetAsync($"sessions/{session.SessionId}", new
+            {
+                sessionId = session.SessionId,
+                hostId = session.HostId,
+                viewerId = session.ViewerId,
+                viewerUserId = request.UserId,
+                hostConnectionId = session.HostConnectionId,
+                viewerConnectionId = session.ViewerConnectionId,
+                status = session.Status,
+                createdAt = session.CreatedAt,
+                acceptedAt = session.AcceptedAt,
+                rejectedAt = session.RejectedAt,
+                endedAt = session.EndedAt,
+                rejectReason = session.RejectReason
+            });
+
+            await _realtimeDatabase.SetAsync($"user_sessions/{request.UserId}/{session.SessionId}", new
+            {
+                sessionId = session.SessionId,
+                hostId = session.HostId,
+                viewerId = session.ViewerId,
+                status = session.Status,
+                createdAt = session.CreatedAt
+            });
 
             Console.WriteLine(
                 $"Control request created. SessionId: {session.SessionId}, Viewer: {session.ViewerId}, Host: {session.HostId}"
@@ -112,6 +258,7 @@ public class RemoteHub : Hub
                 session.HostId,
                 session.ViewerId,
                 request.ViewerName,
+                request.UserId,
                 session.CreatedAt
             });
 
@@ -148,6 +295,14 @@ public class RemoteHub : Hub
             return;
         }
 
+        var acceptedAt = DateTime.UtcNow;
+
+        await _realtimeDatabase.PatchAsync($"sessions/{response.SessionId}", new
+        {
+            status = "Accepted",
+            acceptedAt
+        });
+
         Console.WriteLine($"Session accepted: {response.SessionId}");
 
         await Clients.Client(session.ViewerConnectionId).SendAsync("ControlAccepted", new
@@ -156,7 +311,7 @@ public class RemoteHub : Hub
             session.HostId,
             session.ViewerId,
             Status = "Accepted",
-            AcceptedAt = DateTime.UtcNow
+            AcceptedAt = acceptedAt
         });
 
         await Clients.Caller.SendAsync("AcceptControlSuccess", response.SessionId);
@@ -180,6 +335,15 @@ public class RemoteHub : Hub
             return;
         }
 
+        var rejectedAt = DateTime.UtcNow;
+
+        await _realtimeDatabase.PatchAsync($"sessions/{response.SessionId}", new
+        {
+            status = "Rejected",
+            rejectedAt,
+            rejectReason = response.Reason
+        });
+
         Console.WriteLine($"Session rejected: {response.SessionId}. Reason: {response.Reason}");
 
         await Clients.Client(session.ViewerConnectionId).SendAsync("ControlRejected", new
@@ -189,7 +353,7 @@ public class RemoteHub : Hub
             session.ViewerId,
             Status = "Rejected",
             Reason = response.Reason,
-            RejectedAt = DateTime.UtcNow
+            RejectedAt = rejectedAt
         });
 
         await Clients.Caller.SendAsync("RejectControlSuccess", response.SessionId);
@@ -213,6 +377,15 @@ public class RemoteHub : Hub
             return;
         }
 
+        var endedAt = DateTime.UtcNow;
+
+        await _realtimeDatabase.PatchAsync($"sessions/{sessionId}", new
+        {
+            status = "Ended",
+            endedAt,
+            endReason = "User ended control"
+        });
+
         Console.WriteLine($"Session ended: {sessionId}");
 
         await Clients.Client(session.HostConnectionId).SendAsync("ControlEnded", new
@@ -221,7 +394,7 @@ public class RemoteHub : Hub
             session.HostId,
             session.ViewerId,
             Status = "Ended",
-            EndedAt = DateTime.UtcNow
+            EndedAt = endedAt
         });
 
         await Clients.Client(session.ViewerConnectionId).SendAsync("ControlEnded", new
@@ -230,7 +403,7 @@ public class RemoteHub : Hub
             session.HostId,
             session.ViewerId,
             Status = "Ended",
-            EndedAt = DateTime.UtcNow
+            EndedAt = endedAt
         });
     }
 

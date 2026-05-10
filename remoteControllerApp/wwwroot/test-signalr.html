@@ -92,6 +92,7 @@
 
     <div class="box">
         <h3>Connection</h3>
+        <input id="userId" value="USER_001" placeholder="User ID" />
         <button onclick="connect()">Connect SignalR</button>
         <button onclick="disconnect()">Disconnect</button>
     </div>
@@ -169,6 +170,7 @@
         <button onclick="openViewers()">Open /api/Connection/viewers</button>
         <button onclick="openSessions()">Open /api/Session</button>
         <button onclick="openActiveSessions()">Open /api/Session/active</button>
+        <button onclick="openUsers()">Open /api/User</button>
     </div>
 
     <div id="log"></div>
@@ -368,7 +370,8 @@
 
             const request = {
                 hostId: document.getElementById("hostId").value,
-                computerName: document.getElementById("computerName").value
+                computerName: document.getElementById("computerName").value,
+                userId: document.getElementById("userId").value
             };
 
             await connection.invoke("RegisterHost", request);
@@ -383,7 +386,8 @@
 
             const request = {
                 viewerId: document.getElementById("viewerId").value,
-                viewerName: document.getElementById("viewerName").value
+                viewerName: document.getElementById("viewerName").value,
+                userId: document.getElementById("userId").value
             };
 
             await connection.invoke("RegisterViewer", request);
@@ -421,7 +425,8 @@
             const request = {
                 hostId: document.getElementById("hostId").value,
                 viewerId: document.getElementById("viewerId").value,
-                viewerName: document.getElementById("viewerName").value
+                viewerName: document.getElementById("viewerName").value,
+                userId: document.getElementById("userId").value
             };
 
             await connection.invoke("RequestControl", request);
@@ -561,16 +566,12 @@
             const request = {
                 sessionId: sessionId,
                 imageBase64: fakeFrame.imageBase64,
-
                 screenWidth: fakeFrame.screenWidth,
                 screenHeight: fakeFrame.screenHeight,
-
                 frameWidth: fakeFrame.frameWidth,
                 frameHeight: fakeFrame.frameHeight,
-
                 mouseX: fakeFrame.mouseX,
                 mouseY: fakeFrame.mouseY,
-
                 sentAt: new Date().toISOString()
             };
 
@@ -887,6 +888,10 @@
 
         function openActiveSessions() {
             window.open("/api/Session/active", "_blank");
+        }
+
+        function openUsers() {
+            window.open("/api/User", "_blank");
         }
 
         bindRemoteScreenInputEvents();
