@@ -14,6 +14,17 @@ Host chấp nhận hoặc từ chối phiên
 Host gửi màn hình sang Viewer
 Viewer gửi thao tác chuột / bàn phím về Host
 ```
+api::
+POST /api/User :đăng kí
+POST /api/User/login :đăng nhập
+GET /api/User : lấy toàn bộ user
+GET /api/User/{userId} : lấy user theo id
+PATCH /api/User/{userId} : update thông tin user
+POST /api/User/{userId}/deactivate: vô hiệu hóa user
+GET /api/Connection/hosts : lấy danh sách host đang onl
+GET /api/Connection/viewers : lấy danh sách viewr onl
+GET /api/Session : kiểm tra các phiên điều khiển
+/remoteHub : kiểm tra signalR
 
 Kiến trúc hiện tại:
 
