@@ -87,50 +87,56 @@ public class RemoteHub : Hub
 
     public async Task RegisterHost(HostRegisterDto request)
     {
+        if (request == null)
+            throw new HubException("Request is null.");
+
         if (string.IsNullOrWhiteSpace(request.HostId))
-        {
-            await Clients.Caller.SendAsync("RegisterHostFailed", "HostId is required.");
-            return;
-        }
+            throw new HubException("HostId is required.");
 
         if (string.IsNullOrWhiteSpace(request.UserId))
-        {
-            await Clients.Caller.SendAsync("RegisterHostFailed", "UserId is required.");
-            return;
-        }
+            throw new HubException("UserId is required.");
 
         var now = DateTime.UtcNow;
 
-        _connectionManager.AddOrUpdateHost(
-            request.HostId,
-            Context.ConnectionId,
-            request.ComputerName
-        );
-
-        await _realtimeDatabase.SetAsync($"hosts/{request.HostId}", new
+        try
         {
-            hostId = request.HostId,
-            computerName = request.ComputerName,
-            ownerUserId = request.UserId,
-            connectionId = Context.ConnectionId,
-            isOnline = true,
-            connectedAt = now,
-            lastSeenAt = now
-        });
+            _connectionManager.AddOrUpdateHost(
+                request.HostId,
+                Context.ConnectionId,
+                request.ComputerName
+            );
 
-        await _realtimeDatabase.SetAsync($"user_hosts/{request.UserId}/{request.HostId}", new
+            await _realtimeDatabase.SetAsync($"hosts/{request.HostId}", new
+            {
+                hostId = request.HostId,
+                computerName = request.ComputerName,
+                ownerUserId = request.UserId,
+                connectionId = Context.ConnectionId,
+                isOnline = true,
+                connectedAt = now,
+                lastSeenAt = now
+            });
+
+            await _realtimeDatabase.SetAsync($"user_hosts/{request.UserId}/{request.HostId}", new
+            {
+                hostId = request.HostId,
+                computerName = request.ComputerName,
+                isOnline = true,
+                lastSeenAt = now
+            });
+
+            await Groups.AddToGroupAsync(Context.ConnectionId, $"HOST_{request.HostId}");
+
+            Console.WriteLine($"Host registered: {request.HostId} - {request.ComputerName}");
+
+            await Clients.Caller.SendAsync("RegisterHostSuccess", request.HostId);
+        }
+        catch (Exception ex)
         {
-            hostId = request.HostId,
-            computerName = request.ComputerName,
-            isOnline = true,
-            lastSeenAt = now
-        });
+            Console.WriteLine($"RegisterHost error: {ex}");
 
-        await Groups.AddToGroupAsync(Context.ConnectionId, $"HOST_{request.HostId}");
-
-        Console.WriteLine($"Host registered: {request.HostId} - {request.ComputerName}");
-
-        await Clients.Caller.SendAsync("RegisterHostSuccess", request.HostId);
+            throw new HubException($"RegisterHost failed: {ex.Message}");
+        }
     }
 
     public async Task RegisterViewer(ViewerRegisterDto request)
