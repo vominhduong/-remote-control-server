@@ -258,15 +258,11 @@ public class RemoteHub : Hub
                 $"Control request created. SessionId: {session.SessionId}, Viewer: {session.ViewerId}, Host: {session.HostId}"
             );
 
-            await Clients.Client(session.HostConnectionId).SendAsync("ReceiveControlRequest", new
-            {
+            await Clients.Client(session.HostConnectionId).SendAsync("ReceiveControlRequest",
                 session.SessionId,
-                session.HostId,
                 session.ViewerId,
-                request.ViewerName,
-                request.UserId,
-                session.CreatedAt
-            });
+                request.ViewerName
+            );
 
             await Clients.Caller.SendAsync("ControlRequestSent", new
             {
