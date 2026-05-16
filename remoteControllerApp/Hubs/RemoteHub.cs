@@ -417,12 +417,6 @@ public class RemoteHub : Hub
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(request.ImageBase64))
-        {
-            await Clients.Caller.SendAsync("SendScreenFrameFailed", "ImageBase64 is required.");
-            return;
-        }
-
         var session = _sessionManager.GetAcceptedSession(request.SessionId);
 
         if (session == null)
@@ -431,25 +425,7 @@ public class RemoteHub : Hub
             return;
         }
 
-        await Clients.Client(session.ViewerConnectionId).SendAsync("ReceiveScreenFrame", new
-        {
-            session.SessionId,
-            session.HostId,
-            session.ViewerId,
-
-            request.ImageBase64,
-
-            request.ScreenWidth,
-            request.ScreenHeight,
-            request.FrameWidth,
-            request.FrameHeight,
-
-            request.MouseX,
-            request.MouseY,
-
-            request.SentAt,
-            ReceivedAt = DateTime.UtcNow
-        });
+        await Clients.Client(session.ViewerConnectionId).SendAsync("ReceiveScreenFrame", request);
     }
 
     public async Task SendMouseEvent(MouseEventDto request)
